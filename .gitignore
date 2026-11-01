@@ -1,0 +1,17 @@
+# Données brutes et nettoyées
+data/raw/*
+data/processed/*
+
+# Fichiers temporaires Python
+__pycache__/
+*.pyc
+
+# Environnements virtuels
+.venv/
+venv/
+
+# Fichiers système Mac
+.DS_Store
+
+# Configuration locale
+.env
