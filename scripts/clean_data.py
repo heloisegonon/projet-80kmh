@@ -100,11 +100,28 @@ def clean_caracteristiques(df, year):
 
     # Coordonnées : entiers multipliés par 100 000 avant 2019,
     # décimaux avec une virgule ensuite. La valeur 0 signifie 'inconnu'.
+        # Nettoyage des coordonnées géographiques
     for column in ["lat", "long"]:
-        values = pd.to_numeric(df[column].str.replace(",", ".", regex=False), errors="coerce")
+        values = pd.to_numeric(
+            df[column].str.replace(",", ".", regex=False),
+            errors="coerce"
+        )
+
+        # Avant 2019, les coordonnées sont stockées avec un facteur 100 000
         if year < 2019:
             values = values / 100_000
-        df[column] = values.replace(0, np.nan)
+
+        # Les coordonnées égales à zéro ne sont pas exploitables
+        values = values.replace(0, np.nan)
+
+        # On écarte les coordonnées hors des limites géographiques
+        # approximatives du territoire français
+        if column == "lat":
+            values = values.where(values.between(-22, 52))
+        else:
+            values = values.where(values.between(-63, 10))
+
+        df[column] = values
 
     return df[CARAC_COLUMNS]
 
@@ -155,10 +172,19 @@ def build_dataset(years=YEARS):
     # Réseau concerné par le 80 km/h : routes nationales ou départementales,
     # hors agglomération, à double sens (vma n'existe pas avant 2019)
     accidents["reseau_80"] = (
-        accidents["catr"].isin([2, 3])
-        & accidents["agg"].eq(1)
-        & accidents["circ"].eq(2)
-    ).fillna(False)
+    accidents["catr"].isin([2, 3])
+    & accidents["agg"].eq(1)
+    & accidents["circ"].eq(2)
+)
+
+    # On identifie les cas pour lesquels les informations sont insuffisantes
+    informations_incompletes = (
+    accidents["catr"].isna()
+    | accidents["agg"].isna()
+    | accidents["circ"].isna()
+)
+
+    accidents.loc[informations_incompletes, "reseau_80"] = pd.NA
     accidents["apres_reforme"] = accidents["date"] >= DATE_REFORME
 
     return accidents
