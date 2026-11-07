@@ -201,3 +201,198 @@ def lister_fichiers_baac(annees: range | list[int] = range(2010, 2025)) -> pd.Da
     if manquants:
         raise ValueError(f"Fichiers BAAC introuvables : {sorted(manquants)}")
     return fichiers
+
+
+def telecharger(url: str, destination: Path, forcer: bool = False) -> Path:
+    """Télécharge un fichier si absent du cache local.
+
+    Parameters
+    ----------
+    url : str
+        Adresse du fichier.
+    destination : Path
+        Chemin local du fichier.
+    forcer : bool
+        Retélécharge même si le fichier existe déjà.
+
+    Returns
+    -------
+    Path
+        Chemin du fichier local.
+    """
+    destination = Path(destination)
+    if destination.exists() and not forcer:
+        return destination
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with session().get(url, stream=True, timeout=120) as reponse:
+        reponse.raise_for_status()
+        temporaire = destination.with_suffix(destination.suffix + ".part")
+        with open(temporaire, "wb") as fichier:
+            fichier.writelines(reponse.iter_content(chunk_size=1 << 20))
+    temporaire.replace(destination)
+    return destination
+
+
+def telecharger_baac(
+    annees: range | list[int] = range(2010, 2025), dossier: Path = DOSSIER_RAW / "baac"
+) -> pd.DataFrame:
+    """Télécharge les 4 tables BAAC de chaque année dans ``dossier/<annee>/<table>.csv``.
+
+    Returns
+    -------
+    pd.DataFrame
+        La liste des fichiers avec une colonne ``chemin`` vers la copie locale.
+    """
+    fichiers = lister_fichiers_baac(annees)
+    fichiers["chemin"] = [
+        telecharger(f.url, Path(dossier) / str(f.annee) / f"{f.table}.csv") for f in fichiers.itertuples()
+    ]
+    return fichiers
+
+
+@avec_cache_local("radars")
+def charger_radars() -> pd.DataFrame:
+    """Charge la liste des radars fixes (dernière version publiée sur data.gouv.fr).
+
+    Returns
+    -------
+    pd.DataFrame
+        Colonnes ``id_radar``, ``type_radar``, ``date_mise_en_service``, ``vma``,
+        ``lat``, ``lon``.
+    """
+    try:
+        ressources = lister_ressources(DATASET_RADARS).query("format == 'csv'")
+        url = ressources.sort_values("modifie").iloc[-1]["url"]
+    except requests.RequestException:
+        warnings.warn("API data.gouv.fr injoignable : URL des radars de décembre 2025.", stacklevel=2)
+        url = URL_RADARS_SECOURS
+    chemin = telecharger(url, DOSSIER_RAW / "radars" / Path(url).name)
+    radars = pd.read_csv(chemin, sep=";", encoding="latin-1", dtype=str)
+    radars.columns = ["id_radar", "type_radar", "date_mise_en_service", "vma", "lat", "lon"]
+    radars["date_mise_en_service"] = pd.to_datetime(
+        radars["date_mise_en_service"], format="%d/%m/%Y %H:%M", errors="coerce"
+    )
+    for col in ("vma", "lat", "lon"):
+        radars[col] = pd.to_numeric(radars[col].str.strip(), errors="coerce")
+    return radars
+
+
+@avec_cache_local("population")
+def charger_population() -> pd.DataFrame:
+    """Récupère la population au 1er janvier par département (INSEE, API Melodi).
+
+    Returns
+    -------
+    pd.DataFrame
+        Colonnes ``code_dep``, ``annee``, ``population``.
+    """
+    reponse = session().get(URL_MELODI_POPULATION, timeout=60)
+    reponse.raise_for_status()
+    observations = reponse.json()["observations"]
+    population = pd.DataFrame(
+        {
+            "code_dep": [o["dimensions"]["GEO"].split("-")[-1] for o in observations],
+            "annee": [int(o["dimensions"]["TIME_PERIOD"]) for o in observations],
+            "population": [o["measures"]["OBS_VALUE_NIVEAU"]["value"] for o in observations],
+        }
+    )
+    return population.sort_values(["code_dep", "annee"]).reset_index(drop=True)
+
+
+@avec_cache_local("carburants")
+def charger_carburants() -> pd.DataFrame:
+    """Récupère les ventes annuelles de carburants routiers par département (SDES).
+
+    Sert d'indicateur indirect du trafic local, notamment pour neutraliser 2020.
+
+    Returns
+    -------
+    pd.DataFrame
+        Colonnes ``code_dep``, ``annee``, ``carburants_routiers_m3`` et le détail par produit.
+    """
+    reponse = session().get(URL_CARBURANTS_SDES, timeout=60)
+    reponse.raise_for_status()
+    brut = pd.read_csv(io.StringIO(reponse.text), sep=";", dtype={"DEPARTEMENT_CODE": str})
+    carburants = brut.rename(columns={"DEPARTEMENT_CODE": "code_dep", "ANNEE": "annee"})
+    carburants["carburants_routiers_m3"] = carburants[CARBURANTS_ROUTIERS].fillna(0).sum(axis=1)
+    return carburants[["code_dep", "annee", "carburants_routiers_m3", *CARBURANTS_ROUTIERS]]
+
+
+@avec_cache_local("contours")
+def charger_contours(annee: int = 2022):
+    """Récupère les contours des départements de France entière via ``cartiflette``.
+
+    Returns
+    -------
+    geopandas.GeoDataFrame
+        Colonnes ``code_dep``, ``nom_dep``, ``geometry`` (WGS84).
+    """
+    from cartiflette import carti_download
+
+    contours = carti_download(
+        values="France",
+        crs=4326,
+        borders="DEPARTEMENT",
+        vectorfile_format="geojson",
+        simplification=50,
+        filter_by="FRANCE_ENTIERE",
+        source="EXPRESS-COG-CARTO-TERRITOIRE",
+        year=annee,
+    )
+    return contours.rename(columns={"INSEE_DEP": "code_dep", "LIBELLE_DEPARTEMENT": "nom_dep"})[
+        ["code_dep", "nom_dep", "geometry"]
+    ]
+
+
+def charger_departements_90() -> pd.DataFrame:
+    """Charge la table construite des départements revenus aux 90 km/h (versionnée dans le dépôt)."""
+    return pd.read_csv(
+        RACINE / "data" / "departements_90.csv",
+        dtype={"code_dep": str},
+        parse_dates=["date_releve"],
+    )
+
+
+# --- Cache S3 (SSP Cloud / MinIO) -------------------------------------------------
+
+
+def systeme_fichiers_s3():
+    """Ouvre une connexion S3 à partir des variables d'environnement du SSP Cloud.
+
+    Renvoie ``None`` si les identifiants ne sont pas disponibles.
+    """
+    if not os.environ.get("AWS_ACCESS_KEY_ID"):
+        return None
+    import s3fs
+
+    endpoint = os.environ.get("AWS_S3_ENDPOINT", "minio.lab.sspcloud.fr")
+    return s3fs.S3FileSystem(
+        client_kwargs={"endpoint_url": f"https://{endpoint}"},
+        key=os.environ["AWS_ACCESS_KEY_ID"],
+        secret=os.environ["AWS_SECRET_ACCESS_KEY"],
+        token=os.environ.get("AWS_SESSION_TOKEN"),
+    )
+
+
+def lire_parquet_s3(chemin_s3: str) -> pd.DataFrame | None:
+    """Lit un Parquet sur S3 ; renvoie ``None`` si S3 ou le fichier est indisponible."""
+    fs = systeme_fichiers_s3()
+    if fs is None or not fs.exists(chemin_s3):
+        return None
+    with fs.open(chemin_s3, "rb") as fichier:
+        return pd.read_parquet(fichier)
+
+
+def ecrire_parquet_s3(df: pd.DataFrame, chemin_s3: str) -> bool:
+    """Écrit un DataFrame en Parquet sur S3 ; renvoie ``False`` si S3 est indisponible."""
+    fs = systeme_fichiers_s3()
+    if fs is None:
+        return False
+    with fs.open(chemin_s3, "wb") as fichier:
+        df.to_parquet(fichier, index=False)
+    return True
+
+
+if __name__ == "__main__":
+    fichiers = telecharger_baac()
+    print(f"{len(fichiers)} fichiers BAAC disponibles dans {DOSSIER_RAW / 'baac'}")
