@@ -320,28 +320,36 @@ def charger_carburants() -> pd.DataFrame:
 
 @avec_cache_local("contours")
 def charger_contours(annee: int = 2022):
-    """Récupère les contours des départements de France entière via ``cartiflette``.
+    """Récupère les contours des départements de France entière."""
+    import geopandas as gpd
 
-    Returns
-    -------
-    geopandas.GeoDataFrame
-        Colonnes ``code_dep``, ``nom_dep``, ``geometry`` (WGS84).
-    """
-    from cartiflette import carti_download
+    try:
+        from cartiflette import carti_download
 
-    contours = carti_download(
-        values="France",
-        crs=4326,
-        borders="DEPARTEMENT",
-        vectorfile_format="geojson",
-        simplification=50,
-        filter_by="FRANCE_ENTIERE",
-        source="EXPRESS-COG-CARTO-TERRITOIRE",
-        year=annee,
-    )
-    return contours.rename(columns={"INSEE_DEP": "code_dep", "LIBELLE_DEPARTEMENT": "nom_dep"})[
-        ["code_dep", "nom_dep", "geometry"]
-    ]
+        contours = carti_download(
+            values="France",
+            crs=4326,
+            borders="DEPARTEMENT",
+            vectorfile_format="geoparquet",
+            simplification=50,
+            filter_by="FRANCE_ENTIERE",
+            source="EXPRESS-COG-CARTO-TERRITOIRE",
+            year=annee,
+        )
+        return contours.rename(columns={"INSEE_DEP": "code_dep", "LIBELLE_DEPARTEMENT": "nom_dep"})[
+            ["code_dep", "nom_dep", "geometry"]
+        ]
+    except Exception:
+        # Repli direct sur les contours officiels IGN/Etalab en GeoJSON
+        url_geojson = (
+            "https://raw.githubusercontent.com/gregoiredavid/france-geojson/"
+            "master/departements-version-simplifiee.geojson"
+        )
+        chemin = telecharger(url_geojson, DOSSIER_RAW / "contours" / "departements.geojson")
+        contours = gpd.read_file(chemin)
+        return contours.rename(columns={"code": "code_dep", "nom": "nom_dep"})[
+            ["code_dep", "nom_dep", "geometry"]
+        ]
 
 
 def charger_departements_90() -> pd.DataFrame:
