@@ -5,3 +5,6 @@ matplotlib
 seaborn
 jupyter
 pyarrow
+geopandas
+s3fs
+cartiflette
