@@ -368,3 +368,176 @@ def tracer_evolution_categories(tableau: pd.DataFrame, categorie: str, libelles:
     ax.set(title=titre, xlabel="Évolution des tués par an, 2021-2024 par rapport à 2015-2019 (%)")
     _legende_dessous(ax)
     return ax
+
+
+# --- G7 : cartes avant / après ------------------------------------------------------------
+
+
+def cartes_avant_apres(contours, taux: pd.DataFrame, limite_evolution: float = 60):
+    """G7 : taux de tués par million d'habitants avant, après (même échelle), et évolution."""
+    carte = contours.merge(taux, on="code_dep", how="inner")
+    fig, axes = plt.subplots(1, 3, figsize=(17, 6.5))
+    vmax = np.nanpercentile(carte[["taux_avant", "taux_apres"]].to_numpy(dtype=float), 98)
+    for ax, colonne, titre in (
+        (axes[0], "taux_avant", "Avant : 2015-2019"),
+        (axes[1], "taux_apres", "Après : 2021-2024"),
+    ):
+        carte.plot(
+            column=colonne, ax=ax, cmap=RAMPE_BLEUE, vmin=0, vmax=vmax, edgecolor=SURFACE, linewidth=0.4
+        )
+        ax.set_title(titre)
+        ax.set_axis_off()
+    echelle = mpl.cm.ScalarMappable(cmap=RAMPE_BLEUE, norm=mpl.colors.Normalize(0, vmax))
+    fig.colorbar(
+        echelle,
+        ax=axes[:2],
+        orientation="horizontal",
+        shrink=0.5,
+        pad=0.02,
+        label="Tués par million d'habitants et par an (RD hors agglomération)",
+    )
+
+    norme = TwoSlopeNorm(vmin=-limite_evolution, vcenter=0, vmax=limite_evolution)
+    carte.assign(evol=carte["evolution_%"].astype(float).clip(-limite_evolution, limite_evolution)).plot(
+        column="evol",
+        ax=axes[2],
+        cmap=DIVERGENTE,
+        norm=norme,
+        edgecolor=SURFACE,
+        linewidth=0.4,
+        missing_kwds={"color": GRILLE},
+    )
+    axes[2].set_title("Évolution (%)")
+    axes[2].set_axis_off()
+    fig.colorbar(
+        mpl.cm.ScalarMappable(cmap=DIVERGENTE, norm=norme),
+        ax=axes[2],
+        orientation="horizontal",
+        shrink=0.8,
+        pad=0.02,
+        label=f"Évolution du taux (%), bornée à ±{limite_evolution:.0f}",
+    )
+    fig.suptitle(
+        "G7. Mortalité sur les routes départementales hors agglomération, par département",
+        x=0.02,
+        ha="left",
+        fontweight="bold",
+    )
+    return fig
+
+
+# --- Robustesse et radars -------------------------------------------------------------------
+
+
+def tracer_robustesse(robustesse: pd.DataFrame, ax=None):
+    """Effet estimé (points de %) dans chaque configuration : une ligne par configuration."""
+    configurations = robustesse.index.get_level_values(0).unique()
+    ax = ax or plt.subplots(figsize=(10, 0.7 * len(configurations) + 1.5))[1]
+    styles = {
+        "total": (COULEURS_GROUPES["G90_total"], "o"),
+        "total + partiel": (COULEURS_GROUPES["G90_partiel"], "s"),
+    }
+    for etiquette, (couleur, marqueur) in styles.items():
+        valeurs = robustesse.xs(etiquette, level=1)["effet_points_%"].reindex(configurations)
+        ax.scatter(
+            valeurs,
+            range(len(configurations)),
+            color=couleur,
+            marker=marqueur,
+            s=70,
+            edgecolor=SURFACE,
+            linewidth=1.5,
+            zorder=3,
+            label=f"Groupe traité : {etiquette}",
+        )
+        for y, v in enumerate(valeurs):
+            ax.annotate(
+                f"{v:+.1f}",
+                (v, y),
+                xytext=(0, 9),
+                textcoords="offset points",
+                ha="center",
+                fontsize=8,
+                color=ENCRE_SECONDAIRE,
+            )
+    ax.axvline(0, color=ENCRE, lw=0.8)
+    ax.set_yticks(range(len(configurations)), configurations)
+    ax.invert_yaxis()
+    ax.grid(axis="y", visible=False)
+    ax.set(
+        title="Robustesse. Effet estimé du relèvement selon la configuration (différence de différences)",
+        xlabel="Écart d'évolution des tués avec les départements restés à 80 km/h (points de %)",
+    )
+    ax.margins(x=0.08, y=0.15)
+    _legende_dessous(ax, ncol=2)
+    return ax
+
+
+def tracer_radars(radars_proches: pd.DataFrame, effectif_min: int = 20):
+    """G8 : accidents à moins de 1 km des radars avant / après mise en service, par type de radar."""
+    donnees = radars_proches.copy()
+    effectifs = donnees["type_radar"].value_counts()
+    donnees["type"] = donnees["type_radar"].where(
+        donnees["type_radar"].map(effectifs) >= effectif_min, "Autres"
+    )
+    donnees = donnees[donnees["type"] != "Autres"]
+    totaux = donnees.groupby("type")[["avant", "apres", "attendu_apres"]].sum()
+    totaux.loc["Ensemble"] = totaux.sum()
+    evolution = pd.DataFrame(
+        {
+            "Observée": 100 * (totaux["apres"] / totaux["avant"] - 1),
+            "Attendue (tendance nationale)": 100 * (totaux["attendu_apres"] / totaux["avant"] - 1),
+        }
+    )
+    n = donnees["type"].value_counts()
+    n["Ensemble"] = len(donnees)
+
+    fig, axes = plt.subplots(1, 2, figsize=(15, 5), gridspec_kw={"width_ratios": [1.1, 1]})
+    positions = np.arange(len(evolution))
+    for k, (serie, couleur, hachure) in enumerate(
+        (("Observée", COULEURS_SERIES[0], None), ("Attendue (tendance nationale)", SURFACE, "///"))
+    ):
+        barres = axes[0].bar(
+            positions + (k - 0.5) * 0.38,
+            evolution[serie],
+            width=0.38,
+            color=couleur,
+            hatch=hachure,
+            edgecolor=COULEURS_SERIES[0] if hachure else SURFACE,
+            linewidth=1.5,
+            label=serie,
+        )
+        axes[0].bar_label(barres, fmt="%+.1f %%", fontsize=8, color=ENCRE_SECONDAIRE, padding=2)
+    axes[0].set_xticks(positions, [f"{t}\n({n[t]} radars)" for t in evolution.index])
+    axes[0].axhline(0, color=ENCRE, lw=0.8)
+    axes[0].grid(axis="x", visible=False)
+    axes[0].set(title="Accidents dans un rayon de 1 km : évolution sur 2 ans", ylabel="Évolution (%)")
+    axes[0].legend(loc="best")
+
+    ecart = (donnees["apres"] - donnees["attendu_apres"]).groupby(donnees["type"])
+    types = list(ecart.groups)
+    axes[1].boxplot(
+        [ecart.get_group(t) for t in types],
+        tick_labels=types,
+        vert=False,
+        widths=0.5,
+        showfliers=False,
+        medianprops={"color": COULEURS_SERIES[0], "linewidth": 2},
+        boxprops={"color": ENCRE_SECONDAIRE},
+        whiskerprops={"color": ENCRE_SECONDAIRE},
+        capprops={"color": ENCRE_SECONDAIRE},
+    )
+    axes[1].axvline(0, color=ENCRE, lw=0.8)
+    axes[1].grid(axis="y", visible=False)
+    axes[1].set(
+        title="Écart par radar : observé − attendu après mise en service",
+        xlabel="Accidents (2 ans après) en plus (+) ou en moins (−) que la tendance nationale",
+    )
+    fig.suptitle(
+        "G8. Accidents autour des radars fixes mis en service en 2020-2022",
+        x=0.02,
+        ha="left",
+        fontweight="bold",
+    )
+    fig.tight_layout()
+    return fig
