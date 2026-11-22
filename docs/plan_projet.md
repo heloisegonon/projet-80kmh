@@ -197,3 +197,223 @@ Environ 3 400 radars, avec identifiant, coordonnées GPS, date de mise en servic
 
 ---
 
+## 5. Nettoyage et harmonisation
+
+C'est l'étape la plus délicate techniquement. Elle doit être **entièrement codée** (aucune modification à la main des fichiers bruts) et **documentée** dans le rapport.
+
+### 5.1 Les ruptures connues des BAAC
+
+| Problème | Années | Traitement |
+|---|---|---|
+| Changement de format en 2019 (variables ajoutées ou renommées, séparateur, encodage) | avant/après 2019 | Une fonction de lecture par format, puis renommage vers un **schéma commun** |
+| Encodage des anciens fichiers (souvent `latin-1`) | avant 2019 | Paramètre `encoding` dans `pd.read_csv`, testé sur chaque année |
+| Séparateur différent selon les années (`,` ou `;`, voire tabulation pour certains fichiers) | variable | Détection automatique ou dictionnaire `{année: séparateur}` |
+| Année sur 2 chiffres, heure au format entier (`1530`) | avant 2019 | Conversion vers une vraie date-heure |
+| Code département avec un zéro final (`590` pour le Nord) dans les anciens fichiers | avant 2019 | Fonction de normalisation vers le code officiel (`59`, `2A`, `2B`…) |
+| Coordonnées dans un format entier et souvent manquantes | avant 2019 | Conversion et contrôle de cohérence (point bien dans le département déclaré) |
+| Variable `vma` (vitesse maximale autorisée) absente | avant 2019 | Voir 5.2 |
+| Ajout des usagers en fuite | depuis 2021 | Exclure ou isoler ces usagers pour garder une série comparable |
+| Fiabilité des blessés hospitalisés | depuis 2018 | Indicateur principal = **tués** ; blessés en analyse secondaire seulement |
+
+### 5.2 Identifier le réseau concerné par la mesure
+
+La mesure de 2018 concerne les routes **hors agglomération**, **bidirectionnelles**, **sans séparateur central**. Nous définissons donc :
+
+```
+reseau_concerne = (agg == hors agglomération)
+                  & (circ == bidirectionnelle)
+                  & (catr in {route nationale, route départementale, voie communale})
+```
+
+- Depuis 2019, on peut **vérifier** cette règle avec la variable `vma` (part des accidents du réseau concerné avec `vma` égale à 80 ou 90).
+- Avant 2019, on applique la même règle sans pouvoir la vérifier. Il faut le dire dans le rapport.
+- Pour Q2, on se restreint aux **routes départementales** (`catr == 3`), puisque ce sont les départements qui décident du relèvement.
+
+> 📝 Documenter dans le rapport : la règle exacte, la part des accidents classés « concernés » chaque année, et un tableau de contrôle par année pour montrer l'absence de saut artificiel en 2019.
+
+### 5.3 Schéma de sortie
+
+Toutes les années sont empilées dans **deux tables Parquet** :
+
+- `accidents.parquet` : une ligne par accident (caractéristiques + lieux) avec `annee`, `mois`, `date`, `code_dep`, `reseau_concerne`, `catr`, `type_collision`, `nb_tues`, `nb_blesses`, `lat`, `lon` ;
+- `usagers.parquet` : une ligne par usager, pour les analyses par âge ou type d'usager.
+
+### 5.4 Exemple de squelette de code
+
+```python
+# src/collecte.py
+import requests
+
+DATASET_BAAC = "53698f4ca3a729239d2036df"
+
+def lister_ressources_baac() -> list[dict]:
+    """Interroge l'API data.gouv.fr et renvoie les fichiers du jeu BAAC."""
+    url = f"https://www.data.gouv.fr/api/1/datasets/{DATASET_BAAC}/"
+    reponse = requests.get(url, timeout=30)
+    reponse.raise_for_status()
+    return [
+        {"titre": r["title"], "url": r["url"], "format": r["format"]}
+        for r in reponse.json()["resources"]
+    ]
+```
+
+```python
+# src/nettoyage.py
+import pandas as pd
+
+def normaliser_departement(code: str) -> str:
+    """Convertit les anciens codes BAAC (ex. '590') en codes officiels ('59')."""
+    ...
+
+def lire_caracteristiques(url: str, annee: int) -> pd.DataFrame:
+    """Lit un fichier 'caracteristiques' quelle que soit l'année
+    et renvoie un DataFrame au schéma commun."""
+    sep = ";" if annee >= 2019 else ","
+    encodage = "utf-8" if annee >= 2019 else "latin-1"
+    df = pd.read_csv(url, sep=sep, encoding=encodage, dtype=str)
+    ...
+    return df
+```
+
+Chaque fonction a une docstring, prend des paramètres explicites et ne dépend d'aucun chemin local en dur.
+
+---
+
+## 6. Construction des indicateurs
+
+### 6.1 Indicateur principal
+
+**Nombre de tués sur le réseau concerné**, par département et par année (ou par semestre), rapporté :
+
+- à la **population** (tués par million d'habitants), pour comparer des départements de tailles différentes ;
+- au **trafic** quand l'indicateur est disponible, pour neutraliser 2020.
+
+### 6.2 Indicateurs secondaires
+
+- Nombre d'**accidents mortels** (plus stable que le nombre de tués, car un accident peut faire plusieurs victimes).
+- Tués par **type de collision** : frontale, sortie de route sans tiers, autres.
+- Tués par **type d'usager** : automobilistes, deux-roues motorisés, piétons, cyclistes.
+- **Gravité moyenne** : part des tués parmi les victimes (avec la réserve sur les blessés hospitalisés).
+
+### 6.3 Les groupes
+
+| Groupe | Définition | Utilisé pour |
+|---|---|---|
+| Réseau concerné / non concerné | Règle de la section 5.2 | Q1 |
+| `G80` | Départements restés à 80 km/h | Q2 (groupe témoin) |
+| `G90_partiel` | Départements ayant relevé une partie du réseau | Q2 |
+| `G90_total` | Départements ayant relevé la quasi-totalité du réseau | Q2 |
+| `G80_rural` | Départements restés à 80 km/h, hors départements très urbains | Q2 (robustesse) |
+
+**Définition de « très urbain » :** à fixer à partir de la densité de population ou de la part de population en agglomération (INSEE). Le seuil est choisi **avant** de regarder les résultats et justifié dans le rapport.
+
+### 6.4 Gérer les petits nombres
+
+Dans un petit département, le nombre de tués annuel peut être de quelques dizaines : une variation de quelques décès fait bouger fortement le taux. Pour éviter de surinterpréter le bruit :
+
+- on agrège **par groupe** plutôt que de commenter des départements isolés ;
+- on lisse sur **plusieurs années** (moyenne mobile ou comparaison de périodes) ;
+- on indique, quand c'est utile, un **intervalle de confiance** sur les comptages (approximation de Poisson : un compte `N` a un écart-type d'environ `√N`).
+
+---
+
+## 7. Analyse descriptive
+
+Chaque graphique doit avoir un titre explicite, des axes nommés avec leurs unités, une légende lisible, et **un paragraphe de commentaire** qui relie le résultat à une hypothèse.
+
+### 7.1 Description de la base
+
+- Nombre d'accidents, de tués, d'usagers par année, avant et après harmonisation.
+- Part des accidents sur le réseau concerné, par année (contrôle de la règle de la section 5.2).
+- Valeurs manquantes par variable et par année, sous forme de tableau ou de heatmap.
+
+### 7.2 Graphiques prévus
+
+| # | Graphique | Type | Question |
+|---|---|---|---|
+| G1 | Tués par mois, 2010-2024, réseau concerné vs non concerné, lignes verticales en juillet 2018 et en 2020 | Séries temporelles | Q1 |
+| G2 | Carte des départements selon leur groupe (`G80`, `G90_partiel`, `G90_total`) | Carte choroplèthe | Q2 |
+| G3 | Calendrier des relèvements : date de relèvement par département | Frise ou graphique en points | Q2 |
+| G4 | **Tués en base 100 (2017 ou 2019) par groupe, 2015-2024** | Séries temporelles | Q2 — graphique central |
+| G5 | Évolution en fonction du nombre d'années avant/après le relèvement de chaque département | « Étude d'événement » descriptive | Q2 |
+| G6 | Répartition des tués par type de collision, avant/après, par groupe | Barres groupées | H4 |
+| G7 | Carte des taux de tués par million d'habitants, avant et après | Deux cartes côte à côte | Q2 |
+| G8 | Accidents dans un rayon de 1 km autour des radars, avant/après mise en service | Barres ou boîtes à moustaches | Q3 |
+
+Bibliothèques : `matplotlib` / `seaborn` ou `plotnine` pour les graphiques statiques, `geopandas` + `cartiflette` pour les cartes, éventuellement `plotly` ou `folium` pour une carte interactive des accidents.
+
+### 7.3 Pistes d'interprétation à préparer
+
+- Si la baisse de 2018-2019 est visible **aussi** sur le réseau non concerné, une partie de l'effet relève d'une tendance générale (amélioration du parc automobile, autres mesures).
+- Si `G90_total` diverge de `G80` alors que `G90_partiel` ne diverge pas, cela soutient H3.
+- Si les écarts apparaissent **avant** le relèvement, les groupes n'étaient pas comparables : il faut le dire et relativiser les conclusions (voir section 8).
+
+---
+
+## 8. Démarche scientifique
+
+### 8.1 La méthode centrale : avant/après avec groupe témoin
+
+Pour Q2, nous comparons **l'évolution** de la mortalité dans les départements relevés à celle des départements restés à 80 km/h :
+
+```
+effet estimé = (évolution dans G90) − (évolution dans G80)
+             = (Y_G90, après − Y_G90, avant) − (Y_G80, après − Y_G80, avant)
+```
+
+C'est le principe de la **différence de différences**, appliqué ici de manière descriptive avec des moyennes de groupes, sans avoir besoin d'un modèle économétrique.
+
+**Périodes :**
+
+- *avant* : de juillet 2018 à fin 2019, quand tous les départements sont à 80 km/h. On peut l'élargir à 2015-2019 pour vérifier les tendances ;
+- *après* : de la date de relèvement de chaque département jusqu'à 2024 ;
+- **2020 est traitée à part** à cause du Covid : on présente les résultats avec et sans cette année.
+
+**Condition de validité :** les deux groupes doivent avoir des **tendances parallèles avant le relèvement**. On le vérifie visuellement avec le graphique G4 sur 2015-2019. Si les courbes divergent déjà avant 2020, la comparaison est fragile.
+
+**Dates de relèvement échelonnées :** comme les départements n'ont pas relevé au même moment, le graphique G5 aligne chaque département sur **sa propre date** de relèvement (année −3, −2, −1, 0, +1, +2…). C'est plus juste qu'une date unique pour tout le monde.
+
+### 8.2 Les biais à discuter explicitement
+
+| Biais | Pourquoi il existe | Comment on le traite |
+|---|---|---|
+| **Sélection** | Les départements ont choisi de relever ou non ; les départements très urbains sont tous restés à 80 | Comparaison restreinte aux départements ruraux (`G80_rural`) ; comparaison des profils des groupes avant 2020 |
+| **Covid** | Le trafic s'effondre en 2020, l'année des premiers relèvements | Taux rapportés au trafic quand c'est possible ; résultats avec et sans 2020 |
+| **Petits nombres** | Peu de tués par département et par an | Agrégation par groupe, périodes pluriannuelles, ordres de grandeur de l'incertitude |
+| **Mesures concomitantes** | Certains relèvements s'accompagnent de nouvelles zones à 70 km/h, de radars, d'aménagements | À mentionner ; on ne peut pas tout isoler |
+| **Mesure imparfaite du traitement** | Relèvements partiels, dates parfois imprécises | Distinction `total` / `partiel` ; analyse de sensibilité en décalant les dates de quelques mois |
+| **Rupture des données en 2019** | Changement de format BAAC l'année même de la LOM | Contrôle de la stabilité des séries autour de 2019 (section 5.2) |
+| **Régression vers la moyenne** (Q3) | Les radars sont installés là où il y a eu beaucoup d'accidents, qui auraient de toute façon baissé ensuite | Comparer avec des points accidentogènes sans radar ; prudence dans les conclusions |
+| **Biais de survie** (Q3) | Seuls les radars encore en service figurent dans le fichier | À mentionner |
+
+### 8.3 Tests de robustesse
+
+1. Résultats **avec et sans 2020**.
+2. Résultats en **tués** puis en **accidents mortels**.
+3. Résultats sur **tous les départements** puis sur les **départements ruraux** uniquement.
+4. Résultats avec **`G90_total` seul**, puis avec `G90_total` + `G90_partiel`.
+5. Décaler les **dates de relèvement** de ±6 mois pour voir si la conclusion tient.
+
+Un tableau récapitulatif dans le rapport présente l'effet estimé dans chaque configuration. Une conclusion qui tient dans toutes les configurations est solide ; une conclusion qui ne tient que dans une seule doit être présentée avec prudence.
+
+### 8.4 Confrontation avec l'évaluation officielle
+
+L'ONISR a publié une étude sur l'impact du relèvement à 90 km/h entre 2019 et 2022, qui conclut à une surmortalité dans les départements relevés. Dans le rapport :
+
+- résumer sa méthode (groupes, période, indicateur) ;
+- comparer nos groupes aux siens ;
+- comparer nos ordres de grandeur aux siens ;
+- expliquer les écarts éventuels (définition des groupes, période, traitement de 2020).
+
+Retrouver un résultat officiel avec ses propres données, ou expliquer de manière convaincante pourquoi on s'en écarte, est un très bon argument de démarche scientifique.
+
+### 8.5 Ce que nous ne pourrons pas conclure
+
+À écrire noir sur blanc dans la conclusion :
+
+- nous mesurons l'effet d'une règle, pas de la vitesse réelle ;
+- une comparaison de groupes non tirés au hasard ne prouve pas la causalité, elle la rend plus ou moins plausible ;
+- les résultats valent pour le réseau secondaire français entre 2015 et 2024, pas au-delà.
+
+---
+
