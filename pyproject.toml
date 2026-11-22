@@ -1,0 +1,28 @@
+[project]
+name = "projet-80kmh"
+version = "0.1.0"
+description = "80 km/h, retour aux 90 km/h et radars : quel effet sur la mortalité routière ? (ENSAE 2A, Python pour la data science)"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "pandas>=2.2,<3",
+    "pyarrow>=15",
+    "duckdb>=1.0",
+    "requests>=2.31",
+    "geopandas>=1.0",
+    "cartiflette>=0.4",
+    "pynsee>=0.2",
+    "matplotlib>=3.8",
+    "seaborn>=0.13",
+    "plotnine>=0.13",
+    "python-dotenv>=1.0",
+    "s3fs>=2024.2",
+    "ipykernel>=6.29",
+    "ipywidgets>=8.1",
+    "nbconvert>=7.16",
+    "nb-clean>=3.2",
+    "ruff>=0.5",
+]
+
+[tool.ruff]
+line-length = 110
