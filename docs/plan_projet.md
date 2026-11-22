@@ -417,3 +417,229 @@ Retrouver un résultat officiel avec ses propres données, ou expliquer de mani�
 
 ---
 
+## 9. Reproductibilité
+
+**Condition non négociable :** le notebook final doit s'exécuter de la première à la dernière cellule sans erreur. Sinon, la moyenne est impossible.
+
+### 9.1 Principes
+
+- **Aucune donnée téléchargée à la main.** Tout passe par du code qui part des URL publiques (API data.gouv.fr pour les BAAC et les radars, `pynsee` et `cartiflette` pour l'INSEE et les contours).
+- **Exception documentée :** la table `data/departements_90.csv` est construite par nous et versionnée dans le dépôt. Elle est petite (une centaine de lignes), donc sa place dans Git est justifiée.
+- **Les gros fichiers ne vont pas dans Git.** Les BAAC harmonisés en Parquet sont stockés sur l'espace S3 du SSP Cloud (MinIO), comme expliqué dans le cours.
+- **Fonctionnement en cascade :** le notebook lit d'abord la version Parquet sur S3 ; si elle n'est pas accessible, il retélécharge et reconstruit les données depuis les sources brutes. Les deux chemins doivent fonctionner.
+- **Pas de secret dans le code.** Si un identifiant est nécessaire (S3), il passe par des variables d'environnement (`.env` non versionné, `python-dotenv`).
+
+### 9.2 Dépendances
+
+Un fichier `pyproject.toml` (ou `requirements.txt`) avec les versions minimales :
+
+```
+pandas
+pyarrow
+duckdb
+requests
+geopandas
+cartiflette
+pynsee
+matplotlib
+seaborn
+plotnine
+python-dotenv
+s3fs
+nb-clean
+```
+
+### 9.3 Test final
+
+Une semaine avant le rendu, **un membre du groupe qui n'a pas écrit le code** clone le dépôt dans un service SSP Cloud vierge, installe les dépendances en suivant le `README.md`, et lance « Exécuter tout ». Tout problème rencontré est corrigé et le `README.md` mis à jour.
+
+---
+
+## 10. Organisation du code et du dépôt
+
+### 10.1 Arborescence
+
+```
+projet-80kmh/
+├── README.md                 # problématique, résultats clés, instructions de reproduction
+├── pyproject.toml            # dépendances
+├── .gitignore                # données brutes, .env, caches
+├── data/
+│   └── departements_90.csv   # table construite à la main, sourcée
+├── src/
+│   ├── __init__.py
+│   ├── collecte.py           # API data.gouv, téléchargements, lecture/écriture S3
+│   ├── nettoyage.py          # harmonisation des années, normalisation des codes
+│   ├── indicateurs.py        # agrégations, taux, groupes, différence de différences
+│   └── graphiques.py         # fonctions de visualisation réutilisables
+├── rapport.ipynb             # le rapport : importe src/, contient l'analyse commentée
+└── docs/
+    └── collecte_departements.md  # journal de la collecte de la table des relèvements
+```
+
+### 10.2 Règles de qualité du code
+
+- **Pas de copier-coller de cellules** : dès qu'une opération est répétée (par exemple pour chaque année), elle devient une fonction dans `src/`.
+- **Docstrings** pour toutes les fonctions : ce qu'elle fait, ses paramètres, ce qu'elle renvoie.
+- **Noms explicites** en français ou en anglais, mais de façon cohérente.
+- **Formatage automatique** avec `ruff format` ou `black`.
+- **Sorties du notebook nettoyées** avant chaque commit (`nb-clean`), pour limiter les conflits Git.
+- Le notebook ne contient que de **l'orchestration et du commentaire** : chargement, appels de fonctions, graphiques, interprétation.
+
+---
+
+## 11. Répartition du travail et usage de Git
+
+### 11.1 Rôles
+
+| Membre | Responsabilité principale | Fichiers |
+|---|---|---|
+| **A — Accidents** | Collecte et harmonisation des BAAC 2010-2024, règle du réseau concerné, tables Parquet | `collecte.py`, `nettoyage.py` |
+| **B — Traitement et contexte** | Construction de la table des départements relevés, radars, population, trafic, contours | `data/departements_90.csv`, `docs/collecte_departements.md`, partie de `collecte.py` |
+| **C — Analyse et rapport** | Indicateurs, graphiques, cartes, différence de différences, robustesse, comparaison ONISR, rédaction | `indicateurs.py`, `graphiques.py`, `rapport.ipynb` |
+
+Les rôles ne sont pas étanches : chacun relit le travail des autres et tout le monde doit pouvoir expliquer l'ensemble du projet à l'oral.
+
+### 11.2 Pratiques Git attendues
+
+- Une **branche par fonctionnalité** (`collecte-baac`, `table-releves`, `graphique-g4`…).
+- Des **commits fréquents** avec des messages explicites (« Harmonise le code département des BAAC avant 2019 » plutôt que « update »).
+- Fusion dans `main` uniquement par **pull request relue par un autre membre**.
+- **Jamais deux personnes sur le même notebook en même temps sur la même branche.**
+- Utilisation des **issues GitHub** pour suivre les tâches et les problèmes rencontrés.
+
+Le cours pénalise les dépôts où le projet a simplement été déposé en une fois, et valorise les dépôts où l'historique montre un vrai travail collaboratif.
+
+---
+
+## 12. Calendrier
+
+À adapter selon la date exacte de rendu (décembre 2026) et de soutenance (janvier 2027).
+
+| Semaine | Dates indicatives | Étape | Livrable |
+|---|---|---|---|
+| 1 | mi-octobre | Validation du sujet par le chargé de TD, création du dépôt, lecture du guide BAAC et de l'étude ONISR | Dépôt créé, `README.md` initial |
+| 2-3 | fin octobre | Collecte des BAAC via l'API ; début de la table des relèvements | Script de téléchargement fonctionnel |
+| 4-5 | début novembre | Harmonisation des années, règle du réseau concerné, contrôles ; table des relèvements terminée | `accidents.parquet`, `departements_90.csv` |
+| 6-7 | mi-novembre | Description de la base, graphiques G1 à G4, cartes | Première version du rapport |
+| 8-9 | fin novembre | Différence de différences, étude d'événement, robustesse, Q3 si le temps le permet | Tableau de robustesse |
+| 10 | début décembre | Comparaison ONISR, rédaction de l'introduction et de la conclusion, relecture croisée | Rapport complet |
+| 11 | une semaine avant le rendu | Test de reproductibilité sur environnement vierge, nettoyage du code, finalisation du `README.md` | Version finale |
+| — | janvier | Préparation et répétitions de la soutenance | Support de présentation |
+
+**Point d'étape :** prévoir une courte réunion chaque semaine pour faire le point, et une « version présentable » du rapport fin novembre pour pouvoir la montrer au chargé de TD si besoin.
+
+---
+
+## 13. Soutenance
+
+### 13.1 Fil narratif proposé
+
+1. **L'accroche (1 min).** Une mesure parmi les plus contestées de la décennie, puis un retour en arrière décidé département par département. Cela crée une occasion rare de mesurer l'effet de la vitesse.
+2. **La question (1 min).** Le 80 km/h a-t-il sauvé des vies, et le retour aux 90 en a-t-il coûté ?
+3. **Les données (2-3 min).** Quinze ans d'accidents, une rupture de format à gérer, et surtout une table des relèvements qui n'existait pas et que nous avons construite. Montrer la carte G2.
+4. **Les résultats (4-5 min).** Le graphique G4 d'abord, commenté lentement. Puis G5 et le tableau de robustesse.
+5. **Les limites (2 min).** Sélection des départements, Covid, petits nombres. Ce que l'on peut conclure et ce que l'on ne peut pas.
+6. **La comparaison avec l'ONISR et la conclusion (1-2 min).**
+
+### 13.2 Conseils
+
+- **Peu de graphiques, bien expliqués :** quatre ou cinq au maximum.
+- Le graphique G4 doit être **compréhensible en dix secondes** : deux ou trois courbes, couleurs contrastées, annotations directement sur le graphique.
+- Chaque membre présente une partie, mais **chacun doit pouvoir répondre** sur l'ensemble.
+- Préparer les réponses aux questions probables :
+  - « Pourquoi ne pas simplement comparer avant et après 2018 ? »
+  - « Comment avez-vous traité 2020 ? »
+  - « Les départements relevés ne sont-ils pas différents dès le départ ? »
+  - « Pourquoi vos résultats diffèrent-ils (ou non) de ceux de l'ONISR ? »
+  - « Comment avez-vous construit la table des relèvements, et quelle confiance lui accorder ? »
+
+---
+
+## 14. Risques et plans de secours
+
+| Risque | Probabilité | Plan de secours |
+|---|---|---|
+| Harmonisation des BAAC plus longue que prévu | Moyenne | Se limiter à 2015-2024 au lieu de 2010-2024 |
+| Dates de relèvement introuvables pour certains départements | Élevée | Les coder à l'année plutôt qu'au mois, ou les exclure avec justification |
+| Pas d'indicateur de trafic par département | Moyenne | Utiliser l'indice national et présenter les résultats sans 2020 |
+| Résultats non significatifs ou contradictoires | Moyenne | Ce n'est pas un échec : expliquer pourquoi les données ne permettent pas de trancher, c'est un résultat |
+| Panne d'une source en ligne au moment de la correction | Faible | Cache Parquet sur S3 + table des relèvements dans le dépôt |
+| Q3 (radars) trop longue | Élevée | La traiter en annexe ou la supprimer : elle est optionnelle |
+
+---
+
+## 15. Checklist au regard du barème
+
+### Données — collecte et nettoyage (4 points)
+
+- [ ] Plusieurs sources croisées (BAAC, table des relèvements, radars, INSEE, trafic)
+- [ ] Utilisation d'une API (data.gouv.fr) et de bibliothèques d'accès aux données (`pynsee`, `cartiflette`)
+- [ ] Construction d'une table originale, sourcée et documentée
+- [ ] Harmonisation codée des 15 années de BAAC, ruptures documentées
+- [ ] Choix de nettoyage expliqués dans le rapport
+
+### Analyse descriptive (4 points)
+
+- [ ] Description de la base et des valeurs manquantes
+- [ ] Graphiques adaptés, avec titres, axes, unités et légendes
+- [ ] Au moins deux cartes
+- [ ] Chaque tableau et graphique commenté et relié à une hypothèse
+
+### Démarche scientifique et reproductibilité (5 points)
+
+- [ ] Problématique et hypothèses posées dès l'introduction
+- [ ] Méthode avant/après avec groupe témoin, tendances parallèles vérifiées
+- [ ] Biais discutés explicitement, tests de robustesse
+- [ ] Comparaison avec l'étude ONISR
+- [ ] Limites clairement énoncées dans la conclusion
+- [ ] Notebook exécutable de bout en bout sans erreur
+- [ ] Données récupérées par le code depuis des sources publiques, cache sur S3
+- [ ] Dépendances listées, `README.md` suffisant pour reproduire
+- [ ] Test sur environnement vierge effectué
+
+### Format du code (2 points)
+
+- [ ] Code organisé en modules dans `src/`
+- [ ] Fonctions documentées, pas de copier-coller
+- [ ] Code formaté, sorties de notebook nettoyées
+- [ ] Historique Git riche : branches, commits réguliers, pull requests relues
+
+### Soutenance (5 points)
+
+- [ ] Fil narratif clair et minuté
+- [ ] Quatre ou cinq visuels maximum, lisibles
+- [ ] Répartition de la parole entre les trois membres
+- [ ] Réponses préparées aux questions probables
+- [ ] Au moins deux répétitions chronométrées
+
+---
+
+## 16. Références
+
+**Données**
+
+- ONISR, *Bases de données annuelles des accidents corporels de la circulation routière, années 2005 à 2024*, data.gouv.fr — <https://www.data.gouv.fr/datasets/53698f4ca3a729239d2036df/>
+- ONISR, *Description des bases de données annuelles des accidents corporels* (PDF joint au jeu de données)
+- Ministère de l'Intérieur, *Liste des radars fixes en France*, data.gouv.fr — <https://www.data.gouv.fr/datasets/liste-des-radars-fixes-en-france/>
+- INSEE, populations légales et données départementales (via `pynsee`)
+- `cartiflette` — <https://github.com/inseefrlab/cartiflette>
+
+**Études et contexte**
+
+- ONISR, *Relèvement de la vitesse maximale autorisée à 90 km/h sur certaines routes départementales, impact 2019-2022* — <https://www.onisr.securite-routiere.gouv.fr/sites/default/files/2026-05/2024-02_23_Impact%20relevement_90_2019-2022-v5.pdf>
+- ONISR, liste des indicateurs labellisés — <https://www.onisr.securite-routiere.gouv.fr/outils-statistiques/indicateurs-labellises>
+- Loi n° 2019-1428 du 26 décembre 2019 d'orientation des mobilités (LOM)
+- Presse-citron, liste des départements revenus aux 90 km/h selon la Ligue de défense des conducteurs — <https://www.presse-citron.net/voici-la-liste-officielle-des-46-departements-dont-la-limite-est-repassee-a-90-km-h/>
+- Roole, point sur les départements revenus aux 90 km/h au 1er juillet 2025 — <https://media.roole.fr/quotidien/reglementation/ces-departements-ou-la-vitesse-est-repassee-a-90-km-h-sur-les-routes-secondaires>
+- Weka, retour aux 90 km/h en Corrèze et dans le Cantal (février 2020) — <https://www.weka.fr/actualite/urbanisme/article/routes-correze-et-cantal-repassent-a-90-km-h-95116/>
+- Caradisiac, retour partiel aux 90 km/h en Dordogne — <https://www.caradisiac.com/la-dordogne-annonce-le-retour-des-90-km-h-187327.htm>
+
+**Cours**
+
+- Lino Galiana, *Python pour la data science*, page d'évaluation — <https://pythonds.linogaliana.fr/content/annexes/evaluation.html>
+- Chapitres du cours utiles : jointures Pandas, Geopandas, cartographie, API, Parquet et S3, Git.
+
+---
+
+*Les codes de variables BAAC indiqués dans ce document sont donnés à titre indicatif : ils doivent être vérifiés dans le guide de codification officiel, en particulier pour les années antérieures à 2019.*
