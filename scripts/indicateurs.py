@@ -256,6 +256,74 @@ def charger_ou_construire(reconstruire: bool = False) -> tuple[pd.DataFrame, pd.
     return accidents, panel
 
 
+# --- Description de la base --------------------------------------------------------------
+
+
+def tableau_controle_annuel(accidents: pd.DataFrame) -> pd.DataFrame:
+    """Accidents, tués et contrôles de la règle du réseau concerné, par année (métropole).
+
+    Returns
+    -------
+    pd.DataFrame
+        Index ``annee`` ; colonnes ``accidents``, ``tues``, ``part_reseau_concerne``
+        (part des accidents classés sur le réseau 80), ``part_reseau_inconnu`` (règle
+        inapplicable faute d'information) et ``part_vma_80_90`` (parmi les accidents du
+        réseau concerné dont la VMA est connue, part à 80 ou 90 km/h : contrôle de la règle,
+        possible seulement depuis 2019).
+    """
+    acc = accidents[accidents["dep"].isin(DEPS_METRO)]
+    concerne = masque_perimetre(acc, "reseau_80")
+    vma_connue = concerne & acc["vma"].notna()
+    controle_vma = acc["vma"].isin([80, 90]).astype(float).where(vma_connue)
+    return pd.DataFrame(
+        {
+            "accidents": acc.groupby("annee").size(),
+            "tues": acc.groupby("annee")["nb_tues"].sum(),
+            "part_reseau_concerne": concerne.groupby(acc["annee"]).mean(),
+            "part_reseau_inconnu": acc["reseau_80"].isna().groupby(acc["annee"]).mean(),
+            "part_vma_80_90": controle_vma.groupby(acc["annee"]).mean(),
+        }
+    )
+
+
+def valeurs_manquantes(accidents: pd.DataFrame, variables: list[str] | None = None) -> pd.DataFrame:
+    """Part de valeurs manquantes (entre 0 et 1) par variable (lignes) et par année (colonnes)."""
+    variables = variables or [
+        "lum",
+        "agg",
+        "int",
+        "atm",
+        "col",
+        "lat",
+        "long",
+        "catr",
+        "circ",
+        "nbv",
+        "prof",
+        "plan",
+        "surf",
+        "vma",
+        "nb_tues",
+    ]
+    return accidents[variables].isna().groupby(accidents["annee"]).mean().T
+
+
+def tues_mensuels_par_reseau(accidents: pd.DataFrame) -> pd.DataFrame:
+    """Tués par mois sur le réseau concerné (colonne ``True``) et sur les autres réseaux (``False``).
+
+    Les accidents dont le réseau est inconnu sont écartés. Entrée de ``graphiques.tracer_mensuel_reseau``.
+    """
+    acc = accidents[accidents["dep"].isin(DEPS_METRO) & accidents["reseau_80"].notna()]
+    mois = acc["date"].dt.to_period("M").dt.to_timestamp().rename("date_mois")
+    reseau = acc["reseau_80"].astype(bool).rename("reseau_80")
+    return (
+        acc.groupby([mois, reseau])["nb_tues"]
+        .sum()
+        .unstack("reseau_80", fill_value=0)
+        .reindex(columns=[True, False])
+    )
+
+
 
 if __name__ == "__main__":
     accidents = pd.read_parquet(DOSSIER_PROCESSED / "accidents.parquet")
