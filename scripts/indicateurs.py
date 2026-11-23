@@ -39,6 +39,28 @@ ANNEES_REFERENCE = (2015, 2016, 2017)
 # Quantile de la loi normale pour les intervalles à 95 %
 Z_95 = 1.96
 
+# Typologies Cerema exclues dans le test « départements ruraux » :
+# z6 = forte densité, z7 = Paris et petite couronne. Seuil fixé avant de regarder les résultats.
+TYPOLOGIES_URBAINES = ("z6", "z7")
+
+# Variable `col` des BAAC (guide de codification) regroupée en 4 types de collision
+CODES_COLLISION = {
+    1: "frontale",
+    2: "arriere_cote",
+    3: "arriere_cote",
+    4: "autres",
+    5: "autres",
+    6: "autres",
+    7: "sans_collision",
+}
+LIBELLES_COLLISION = {
+    "frontale": "Collision frontale (2 véhicules)",
+    "sans_collision": "Sans collision (sortie de route, perte de contrôle)",
+    "arriere_cote": "Collision par l'arrière ou par le côté",
+    "autres": "Autres (3 véhicules et plus, piétons…)",
+}
+
+
 def masque_perimetre(accidents: pd.DataFrame, perimetre: str) -> pd.Series:
     """Renvoie un masque booléen (sans valeur manquante) des accidents du périmètre demandé.
 
@@ -80,6 +102,7 @@ def _agreger_par_mois(acc: pd.DataFrame, suffixe: str) -> pd.DataFrame:
     agregat[f"victimes_graves_{suffixe}"] = agregat[f"tues_{suffixe}"] + agregat[f"blesses_hosp_{suffixe}"]
     return agregat
 
+
 def _intervalle_poisson(indice: pd.Series, effectif: pd.Series) -> tuple[pd.Series, pd.Series]:
     """Bornes à 95 % d'un indice calculé sur un comptage ``effectif`` (approximation de Poisson).
 
@@ -88,6 +111,7 @@ def _intervalle_poisson(indice: pd.Series, effectif: pd.Series) -> tuple[pd.Seri
     """
     erreur_relative = Z_95 / np.sqrt(effectif.where(effectif > 0))
     return (indice * (1 - erreur_relative)).clip(lower=0), indice * (1 + erreur_relative)
+
 
 def affecter_groupes(dep_90: pd.DataFrame) -> pd.DataFrame:
     """Définit le groupe (G80, G90_partiel, G90_total) et la date effective sur 2010-2024.
@@ -335,6 +359,7 @@ def tues_mensuels_par_reseau(accidents: pd.DataFrame) -> pd.DataFrame:
         .reindex(columns=[True, False])
     )
 
+
 # --- Comparaison des groupes (Q2) --------------------------------------------------------
 
 
@@ -439,6 +464,167 @@ def etude_evenement(
     evenement["indice"] = 100 * evenement["n"] / evenement["attendu"]
     evenement["ic_bas"], evenement["ic_haut"] = _intervalle_poisson(evenement["indice"], evenement["n"])
     return evenement.reset_index(drop=True)
+
+
+def evolution_par_categorie(
+    accidents: pd.DataFrame,
+    groupes: pd.DataFrame,
+    categorie: str = "type_collision",
+    perimetre: str = "rd",
+    avant: tuple[int, int] = (2015, 2019),
+    apres: tuple[int, int] = (2021, 2024),
+) -> pd.DataFrame:
+    """G6 : tués par an avant / après et évolution (%), par catégorie et par groupe (H4).
+
+    Parameters
+    ----------
+    accidents : pd.DataFrame
+        Sortie de ``clean_data.build_dataset``.
+    groupes : pd.DataFrame
+        Sortie de :func:`affecter_groupes` (colonnes ``code_dep`` et ``groupe``).
+    categorie : str
+        ``"type_collision"`` (construit à partir de ``col`` avec ``CODES_COLLISION``)
+        ou toute colonne existante de ``accidents`` (par exemple ``implique_2rm``).
+    avant, apres : tuple of int
+        Bornes incluses des deux périodes. 2020 est exclue par défaut (Covid).
+
+    Returns
+    -------
+    pd.DataFrame
+        Colonnes ``groupe``, ``<categorie>``, ``tues_par_an_avant``, ``tues_par_an_apres``,
+        ``evolution_%``. Entrée de ``graphiques.tracer_evolution_categories``.
+    """
+    acc = accidents[accidents["dep"].isin(DEPS_METRO) & masque_perimetre(accidents, perimetre)].copy()
+    if categorie == "type_collision":
+        acc["type_collision"] = acc["col"].map(CODES_COLLISION).fillna("inconnu")
+    acc = acc.merge(groupes[["code_dep", "groupe"]], left_on="dep", right_on="code_dep", how="inner")
+    acc["periode"] = np.select(
+        [acc["annee"].between(*avant), acc["annee"].between(*apres)], ["avant", "apres"], default=""
+    )
+    acc = acc[acc["periode"] != ""]
+
+    tableau = (
+        acc.groupby(["groupe", categorie, "periode"])["nb_tues"]
+        .sum()
+        .unstack("periode", fill_value=0)
+        .reindex(columns=["avant", "apres"], fill_value=0)
+    )
+    tableau["tues_par_an_avant"] = tableau["avant"] / (avant[1] - avant[0] + 1)
+    tableau["tues_par_an_apres"] = tableau["apres"] / (apres[1] - apres[0] + 1)
+    base = tableau["tues_par_an_avant"].where(tableau["tues_par_an_avant"] > 0)
+    tableau["evolution_%"] = 100 * (tableau["tues_par_an_apres"] / base - 1)
+    return tableau.drop(columns=["avant", "apres"]).reset_index()
+
+
+def taux_avant_apres_par_dep(
+    accidents: pd.DataFrame,
+    population: pd.DataFrame,
+    perimetre: str = "rd",
+    avant: tuple[int, int] = (2015, 2019),
+    apres: tuple[int, int] = (2021, 2024),
+) -> pd.DataFrame:
+    """G7 : tués par million d'habitants et par an, avant et après, pour chaque département.
+
+    Returns
+    -------
+    pd.DataFrame
+        Colonnes ``code_dep``, ``tues_avant``, ``tues_apres`` (totaux), ``taux_avant``,
+        ``taux_apres`` et ``evolution_%``. Entrée de ``graphiques.cartes_avant_apres``.
+    """
+    acc = accidents[accidents["dep"].isin(DEPS_METRO) & masque_perimetre(accidents, perimetre)]
+    tues = acc.groupby(["dep", "annee"])["nb_tues"].sum()
+    pop = population.set_index(["code_dep", "annee"])["population"]
+
+    colonnes = {}
+    for nom, (debut, fin) in {"avant": avant, "apres": apres}.items():
+        annees = range(debut, fin + 1)
+        index = pd.MultiIndex.from_product([DEPS_METRO, annees])
+        total = tues.reindex(index, fill_value=0).groupby(level=0).sum()
+        population_moyenne = pop.reindex(index).groupby(level=0).mean()
+        colonnes[f"tues_{nom}"] = total
+        colonnes[f"taux_{nom}"] = 1e6 * total / len(annees) / population_moyenne
+    taux = pd.DataFrame(colonnes).rename_axis("code_dep").reset_index()
+    base = taux["taux_avant"].where(taux["taux_avant"] > 0)
+    taux["evolution_%"] = 100 * (taux["taux_apres"] / base - 1)
+    return taux
+
+
+# --- Différence de différences : tests de robustesse -------------------------------------
+
+
+def _effet_did(tableau: pd.DataFrame, groupes: list[str]) -> dict:
+    """Effet (points de %) = évolution des départements relevés − évolution des G80, mêmes mois.
+
+    L'intervalle à 95 % n'intègre que l'aléa de Poisson côté départements relevés
+    (le groupe G80, beaucoup plus gros, est traité comme connu).
+    """
+    sous = tableau[tableau["groupe"].isin(groupes)]
+    s = sous[["avant", "apres", "g80_avant", "g80_apres"]].sum()
+    rapport = s["apres"] / s["avant"]
+    evol_traites = 100 * (rapport - 1)
+    evol_g80 = 100 * (s["g80_apres"] / s["g80_avant"] - 1)
+    marge = 100 * rapport * Z_95 * np.sqrt(1 / s["apres"] + 1 / s["avant"])
+    effet = evol_traites - evol_g80
+    return {
+        "effet_points_%": effet,
+        "ic_bas": effet - marge,
+        "ic_haut": effet + marge,
+        "evol_traites_%": evol_traites,
+        "evol_g80_%": evol_g80,
+        "victimes_avant": s["avant"],
+        "nb_departements": len(sous),
+    }
+
+
+def tableau_robustesse(panel: pd.DataFrame, variable: str = "tues_rd", fenetre: int = 24) -> pd.DataFrame:
+    """Effet estimé du relèvement dans chaque configuration de la section 8.3 du plan.
+
+    S'appuie sur ``data_analysis.avant_apres_releve`` : pour chaque département relevé,
+    fenêtres symétriques avant / après son relèvement, comparées aux G80 sur les mêmes mois
+    (mois de confinement strict exclus).
+
+    Configurations : référence ; sans 2020 ; accidents mortels au lieu des tués ;
+    départements urbains (``TYPOLOGIES_URBAINES``) exclus ; dates décalées de −6 et +6 mois ;
+    réseau 80 complet (RN + RD) au lieu des seules RD.
+
+    Returns
+    -------
+    pd.DataFrame
+        Index à deux niveaux (``configuration``, ``groupe_traite`` ∈ {« total »,
+        « total + partiel »}) ; colonnes ``effet_points_%``, ``ic_bas``, ``ic_haut``,
+        ``evol_traites_%``, ``evol_g80_%``, ``victimes_avant``, ``nb_departements``.
+        Entrée de ``graphiques.tracer_robustesse``.
+    """
+    from data_analysis import avant_apres_releve
+
+    def decaler(mois: int) -> pd.DataFrame:
+        return panel.assign(date_releve_eff=panel["date_releve_eff"] + pd.DateOffset(months=mois))
+
+    configurations = [
+        ("Référence", panel, variable),
+        ("Sans l'année 2020", panel[panel["annee"] != 2020], variable),
+        ("Accidents mortels au lieu des tués", panel, variable.replace("tues", "accidents_mortels")),
+        (
+            "Départements urbains exclus (z6, z7)",
+            panel[~panel["typologie_cerema"].isin(TYPOLOGIES_URBAINES)],
+            variable,
+        ),
+        ("Dates de relèvement − 6 mois", decaler(-6), variable),
+        ("Dates de relèvement + 6 mois", decaler(6), variable),
+        ("Réseau 80 complet (RN + RD)", panel, variable.replace("_rd", "_80")),
+    ]
+    traites = {"total": ["G90_total"], "total + partiel": ["G90_total", "G90_partiel"]}
+
+    lignes = {}
+    for nom, donnees, var in configurations:
+        tableau = avant_apres_releve(donnees, fenetre=fenetre, variable=var)
+        for etiquette, groupes in traites.items():
+            lignes[(nom, etiquette)] = _effet_did(tableau, groupes)
+    robustesse = pd.DataFrame.from_dict(lignes, orient="index")
+    robustesse.index = pd.MultiIndex.from_tuples(robustesse.index, names=["configuration", "groupe_traite"])
+    return robustesse
+
+
 
 if __name__ == "__main__":
     accidents = pd.read_parquet(DOSSIER_PROCESSED / "accidents.parquet")
