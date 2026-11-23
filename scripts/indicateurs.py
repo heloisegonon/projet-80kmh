@@ -27,6 +27,55 @@ FIN_PERIODE_BAAC = pd.Timestamp("2024-12-31")
 # 96 départements de France métropolitaine (hors DOM)
 DEPS_METRO = [f"{i:02d}" for i in range(1, 96) if i != 20] + ["2A", "2B"]
 
+# Périmètres routiers utilisés dans les agrégations (voir masque_perimetre)
+PERIMETRES = {
+    "reseau_80": "RN et RD bidirectionnelles hors agglomération (réseau concerné par le 80 km/h)",
+    "rd": "RD bidirectionnelles hors agglomération (réseau que les départements peuvent relever)",
+    "temoin": "Agglomération, autoroutes et autres réseaux non concernés",
+}
+
+
+def masque_perimetre(accidents: pd.DataFrame, perimetre: str) -> pd.Series:
+    """Renvoie un masque booléen (sans valeur manquante) des accidents du périmètre demandé.
+
+    Parameters
+    ----------
+    accidents : pd.DataFrame
+        Sortie de ``clean_data.build_dataset``.
+    perimetre : str
+        ``"reseau_80"``, ``"rd"`` ou ``"temoin"`` (voir ``PERIMETRES``). Un accident dont
+        la catégorie de route, la localisation ou le régime de circulation est inconnu
+        n'appartient à aucun périmètre.
+    """
+    if perimetre == "reseau_80":
+        masque = accidents["reseau_80"]
+    elif perimetre == "rd":
+        masque = accidents["catr"].eq(3) & accidents["agg"].eq(1) & accidents["circ"].eq(2)
+    elif perimetre == "temoin":
+        masque = ~accidents["reseau_80"].astype("boolean")
+    else:
+        raise ValueError(f"Périmètre inconnu : {perimetre!r} (attendu : {list(PERIMETRES)})")
+    return masque.astype("boolean").fillna(False).astype(bool)
+
+
+def _agreger_par_mois(acc: pd.DataFrame, suffixe: str) -> pd.DataFrame:
+    """Accidents, accidents mortels, tués et blessés hospitalisés par département et par mois."""
+    acc = acc.assign(
+        nb_tues=acc["nb_tues"].fillna(0),
+        nb_blesses_hosp=acc["nb_blesses_hosp"].fillna(0),
+        mortel=acc["nb_tues"].fillna(0).gt(0).astype(int),
+    )
+    agregat = acc.groupby(["dep", "date_mois"], as_index=False).agg(
+        **{
+            f"accidents_{suffixe}": ("Num_Acc", "size"),
+            f"accidents_mortels_{suffixe}": ("mortel", "sum"),
+            f"tues_{suffixe}": ("nb_tues", "sum"),
+            f"blesses_hosp_{suffixe}": ("nb_blesses_hosp", "sum"),
+        }
+    )
+    agregat[f"victimes_graves_{suffixe}"] = agregat[f"tues_{suffixe}"] + agregat[f"blesses_hosp_{suffixe}"]
+    return agregat
+
 
 def affecter_groupes(dep_90: pd.DataFrame) -> pd.DataFrame:
     """Définit le groupe (G80, G90_partiel, G90_total) et la date effective sur 2010-2024.
@@ -115,42 +164,20 @@ def construire_panel(accidents: pd.DataFrame) -> pd.DataFrame:
     grille["annee"] = grille["date_mois"].dt.year
     grille["mois"] = grille["date_mois"].dt.month
 
-    # 1. Agrégation sur le réseau cible (routes bidirectionnelles hors agglo)
-    cible = (
-        acc[acc["reseau_80"].fillna(False)]
-        .groupby(["dep", "date_mois"], as_index=False)
-        .agg(
-            accidents_80=("Num_Acc", "size"),
-            tues_80=("nb_tues", "sum"),
-            blesses_hosp_80=("nb_blesses_hosp", "sum"),
-            victimes_graves_80=("nb_tues", lambda s: s.sum()),  # complété juste après
-        )
-    )
-    cible["victimes_graves_80"] = cible["tues_80"] + cible["blesses_hosp_80"]
-
-    # 2. Agrégation sur le réseau témoin (autoroutes + agglomération)
-    temoin = (
-        acc[~acc["reseau_80"].fillna(True)]
-        .groupby(["dep", "date_mois"], as_index=False)
-        .agg(
-            accidents_temoin=("Num_Acc", "size"),
-            tues_temoin=("nb_tues", "sum"),
-            blesses_hosp_temoin=("nb_blesses_hosp", "sum"),
-        )
-    )
-    temoin["victimes_graves_temoin"] = temoin["tues_temoin"] + temoin["blesses_hosp_temoin"]
-
-    panel = (
-        grille
-        .merge(cible, left_on=["code_dep", "date_mois"], right_on=["dep", "date_mois"], how="left")
-        .drop(columns="dep")
-        .merge(temoin, left_on=["code_dep", "date_mois"], right_on=["dep", "date_mois"], how="left")
-        .drop(columns="dep")
-    )
+    # 1. Agrégations mensuelles sur trois périmètres (voir PERIMETRES) :
+    #    "80" = réseau concerné par le 80 km/h (RN + RD), "rd" = routes départementales
+    #    seules (cœur de Q2), "temoin" = agglomération et autoroutes.
+    panel = grille
+    for suffixe, perimetre in [("80", "reseau_80"), ("rd", "rd"), ("temoin", "temoin")]:
+        agregat = _agreger_par_mois(acc[masque_perimetre(acc, perimetre)], suffixe)
+        panel = panel.merge(
+            agregat, left_on=["code_dep", "date_mois"], right_on=["dep", "date_mois"], how="left"
+        ).drop(columns="dep")
 
     cols_comptage = [
-        "accidents_80", "tues_80", "blesses_hosp_80", "victimes_graves_80",
-        "accidents_temoin", "tues_temoin", "blesses_hosp_temoin", "victimes_graves_temoin",
+        f"{mesure}_{suffixe}"
+        for suffixe in ("80", "rd", "temoin")
+        for mesure in ("accidents", "accidents_mortels", "tues", "blesses_hosp", "victimes_graves")
     ]
     panel[cols_comptage] = panel[cols_comptage].fillna(0).astype(int)
 
@@ -183,8 +210,51 @@ def construire_panel(accidents: pd.DataFrame) -> pd.DataFrame:
     # Taux pour 100 000 habitants
     panel["taux_tues_80"] = 100_000 * panel["tues_80"] / panel["population"]
     panel["taux_graves_80"] = 100_000 * panel["victimes_graves_80"] / panel["population"]
+    panel["taux_tues_rd"] = 100_000 * panel["tues_rd"] / panel["population"]
 
     return panel
+
+
+# --- Chargement en cascade ---------------------------------------------------------------
+
+
+def charger_ou_construire(reconstruire: bool = False) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Renvoie ``(accidents, panel)`` en reconstruisant ce qui manque depuis les sources brutes.
+
+    1. ``data/processed/accidents.parquet`` est relu s'il existe ; sinon les BAAC sont
+       téléchargées (``collecte.telecharger_baac``) puis nettoyées (``clean_data.build_dataset``).
+    2. ``data/processed/panel_dep.parquet`` est relu s'il existe et contient les colonnes
+       attendues ; sinon il est reconstruit avec :func:`construire_panel`.
+
+    Parameters
+    ----------
+    reconstruire : bool
+        Ignore les fichiers existants et repart des données brutes.
+    """
+    chemin_accidents = DOSSIER_PROCESSED / "accidents.parquet"
+    chemin_panel = DOSSIER_PROCESSED / "panel_dep.parquet"
+    DOSSIER_PROCESSED.mkdir(parents=True, exist_ok=True)
+
+    if chemin_accidents.exists() and not reconstruire:
+        accidents = pd.read_parquet(chemin_accidents)
+    else:
+        from clean_data import build_dataset
+        from collecte import telecharger_baac
+
+        telecharger_baac()
+        accidents = build_dataset()
+        accidents.to_parquet(chemin_accidents, index=False)
+
+    panel = None
+    if chemin_panel.exists() and not reconstruire:
+        panel = pd.read_parquet(chemin_panel)
+        if "tues_rd" not in panel.columns:  # panel produit par une ancienne version du code
+            panel = None
+    if panel is None:
+        panel = construire_panel(accidents)
+        panel.to_parquet(chemin_panel, index=False)
+    return accidents, panel
+
 
 
 if __name__ == "__main__":

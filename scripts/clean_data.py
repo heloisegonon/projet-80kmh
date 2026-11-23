@@ -165,11 +165,12 @@ def build_dataset(years: range = YEARS) -> pd.DataFrame:
 
     # Périmètre principal du 80 km/h : routes nationales (2) ou départementales (3),
     # hors agglomération (agg == 1), à double sens (circ == 2)
+    # Type booléen « nullable » : accepte pd.NA (indispensable avec pandas 3)
     accidents["reseau_80"] = (
         accidents["catr"].isin([2, 3])
         & accidents["agg"].eq(1)
         & accidents["circ"].eq(2)
-    )
+    ).astype("boolean")
     incomplet = accidents["catr"].isna() | accidents["agg"].isna() | accidents["circ"].isna()
     accidents.loc[incomplet, "reseau_80"] = pd.NA
 
