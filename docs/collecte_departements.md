@@ -33,7 +33,7 @@ Le plan demande **deux sources concordantes pour chaque date**. À ce stade :
 
 ## Choix pour l'analyse
 
-La période BAAC s'arrête fin 2024. Les départements relevés après le 31/12/2024 (Morbihan, Eure) sont comptés dans le groupe `G80` (voir `src/indicateurs.affecter_groupes`).
+La période BAAC s'arrête fin 2024. Les départements relevés après le 31/12/2024 (Morbihan, Eure) sont comptés dans le groupe `G80` (voir `scripts/indicateurs.affecter_groupes`).
 
 ## Dictionnaire des colonnes
 
