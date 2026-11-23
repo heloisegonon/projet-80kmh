@@ -34,6 +34,10 @@ PERIMETRES = {
     "temoin": "Agglomération, autoroutes et autres réseaux non concernés",
 }
 
+# Années de référence des indices (trois années pleines avant le 80 km/h)
+ANNEES_REFERENCE = (2015, 2016, 2017)
+# Quantile de la loi normale pour les intervalles à 95 %
+Z_95 = 1.96
 
 def masque_perimetre(accidents: pd.DataFrame, perimetre: str) -> pd.Series:
     """Renvoie un masque booléen (sans valeur manquante) des accidents du périmètre demandé.
@@ -76,6 +80,14 @@ def _agreger_par_mois(acc: pd.DataFrame, suffixe: str) -> pd.DataFrame:
     agregat[f"victimes_graves_{suffixe}"] = agregat[f"tues_{suffixe}"] + agregat[f"blesses_hosp_{suffixe}"]
     return agregat
 
+def _intervalle_poisson(indice: pd.Series, effectif: pd.Series) -> tuple[pd.Series, pd.Series]:
+    """Bornes à 95 % d'un indice calculé sur un comptage ``effectif`` (approximation de Poisson).
+
+    Un comptage N a un écart-type d'environ √N : l'erreur relative vaut 1,96 / √N.
+    L'incertitude sur la période de référence est négligée (elle porte sur plus d'années).
+    """
+    erreur_relative = Z_95 / np.sqrt(effectif.where(effectif > 0))
+    return (indice * (1 - erreur_relative)).clip(lower=0), indice * (1 + erreur_relative)
 
 def affecter_groupes(dep_90: pd.DataFrame) -> pd.DataFrame:
     """Définit le groupe (G80, G90_partiel, G90_total) et la date effective sur 2010-2024.
@@ -323,7 +335,110 @@ def tues_mensuels_par_reseau(accidents: pd.DataFrame) -> pd.DataFrame:
         .reindex(columns=[True, False])
     )
 
+# --- Comparaison des groupes (Q2) --------------------------------------------------------
 
+
+def _par_dep_annee(panel: pd.DataFrame, variable: str) -> pd.DataFrame:
+    """Somme annuelle de ``variable`` par département ; la population (annuelle) n'est pas sommée."""
+    return panel.groupby(["code_dep", "groupe", "annee"], as_index=False).agg(
+        n=(variable, "sum"),
+        population=("population", "first"),
+        date_releve=("date_releve_eff", "first"),
+    )
+
+
+def serie_groupes_ic(
+    panel: pd.DataFrame,
+    variable: str = "tues_rd",
+    par_habitant: bool = True,
+    annees_reference: tuple[int, ...] = ANNEES_REFERENCE,
+) -> pd.DataFrame:
+    """G4 : indice annuel par groupe (base 100 = moyenne des années de référence) et IC à 95 %.
+
+    Parameters
+    ----------
+    panel : pd.DataFrame
+        Sortie de :func:`construire_panel`.
+    variable : str
+        Comptage à suivre (``tues_rd``, ``tues_80``, ``accidents_mortels_rd``…).
+    par_habitant : bool
+        Rapporte le comptage du groupe à sa population avant de calculer l'indice.
+    annees_reference : tuple of int
+        Années dont la moyenne vaut 100.
+
+    Returns
+    -------
+    pd.DataFrame
+        Colonnes ``groupe``, ``periode`` (année), ``n`` (comptage), ``valeur``, ``indice``,
+        ``ic_bas``, ``ic_haut``. Entrée de ``graphiques.tracer_series_groupes_ic``.
+    """
+    serie = (
+        _par_dep_annee(panel, variable)
+        .groupby(["groupe", "annee"], as_index=False)
+        .agg(n=("n", "sum"), population=("population", lambda s: s.sum(min_count=len(s))))
+        .rename(columns={"annee": "periode"})
+    )
+    serie["valeur"] = serie["n"] / serie["population"] * 1e6 if par_habitant else serie["n"]
+    reference = serie[serie["periode"].isin(annees_reference)].groupby("groupe")["valeur"].mean()
+    serie["indice"] = 100 * serie["valeur"] / serie["groupe"].map(reference)
+    serie["ic_bas"], serie["ic_haut"] = _intervalle_poisson(serie["indice"], serie["n"])
+    return serie.drop(columns="population")
+
+
+def etude_evenement(
+    panel: pd.DataFrame,
+    variable: str = "tues_rd",
+    annees_reference: tuple[int, ...] = (-3, -2, -1),
+    relatif_g80: bool = True,
+    min_departements: int = 3,
+    annees_relatives: tuple[int, int] = (-5, 4),
+) -> pd.DataFrame:
+    """G5 : évolution des départements relevés selon le nombre d'années depuis leur relèvement.
+
+    Chaque département relevé est aligné sur l'année de son propre relèvement (année 0).
+    Pour chaque département et chaque année, on calcule un nombre « attendu » :
+
+    - si ``relatif_g80`` : sa moyenne des années de référence, multipliée par l'évolution
+      des départements G80 entre ces mêmes années calendaires et l'année considérée
+      (ce que le département aurait connu s'il avait suivi les G80) ;
+    - sinon : sa moyenne des années de référence.
+
+    L'indice du groupe vaut ``100 × observé / attendu`` (sommes sur les départements).
+    100 signifie « même évolution que les G80 ». Le nombre de départements varie selon
+    l'année relative (un département relevé en 2022 n'a que deux années après) :
+    les années couvrant moins de ``min_departements`` départements sont retirées, ainsi que
+    les années relatives hors de ``annees_relatives`` (bornes incluses).
+
+    Returns
+    -------
+    pd.DataFrame
+        Colonnes ``groupe``, ``annee_relative``, ``n``, ``attendu``, ``nb_departements``,
+        ``indice``, ``ic_bas``, ``ic_haut``. Entrée de ``graphiques.tracer_evenement``.
+    """
+    dep_an = _par_dep_annee(panel, variable)
+    g80 = dep_an[dep_an["groupe"] == "G80"].groupby("annee")["n"].sum()
+
+    traites = dep_an[dep_an["date_releve"].notna()].copy()
+    traites["annee_relative"] = traites["annee"] - traites["date_releve"].dt.year
+    traites["g80"] = traites["annee"].map(g80)
+    reference = (
+        traites[traites["annee_relative"].isin(annees_reference)]
+        .groupby("code_dep")
+        .agg(ref_n=("n", "mean"), ref_g80=("g80", "mean"))
+    )
+    traites = traites.join(reference, on="code_dep")
+    traites["attendu"] = traites["ref_n"] * (traites["g80"] / traites["ref_g80"] if relatif_g80 else 1)
+
+    evenement = traites.groupby(["groupe", "annee_relative"], as_index=False).agg(
+        n=("n", "sum"), attendu=("attendu", "sum"), nb_departements=("code_dep", "nunique")
+    )
+    evenement = evenement[
+        (evenement["nb_departements"] >= min_departements)
+        & evenement["annee_relative"].between(*annees_relatives)
+    ].copy()
+    evenement["indice"] = 100 * evenement["n"] / evenement["attendu"]
+    evenement["ic_bas"], evenement["ic_haut"] = _intervalle_poisson(evenement["indice"], evenement["n"])
+    return evenement.reset_index(drop=True)
 
 if __name__ == "__main__":
     accidents = pd.read_parquet(DOSSIER_PROCESSED / "accidents.parquet")
