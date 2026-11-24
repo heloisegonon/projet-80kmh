@@ -268,27 +268,6 @@ def tracer_series_groupes_ic(serie: pd.DataFrame, titre: str, ylabel: str, ax=No
     return ax
 
 
-def tracer_series_groupes(serie: pd.DataFrame, titre: str, ylabel: str, ax=None):
-    """Courbes par groupe (index = période, colonnes = groupes), base 100, étiquettes directes."""
-    ax = ax or plt.subplots(figsize=(10, 5))[1]
-    points = []
-    for groupe in serie.columns:
-        couleur = COULEURS_GROUPES.get(groupe)
-        ax.plot(
-            serie.index, serie[groupe], marker="o", color=couleur, label=LIBELLES_GROUPES.get(groupe, groupe)
-        )
-        points.append(
-            (serie.index[-1], serie[groupe].iloc[-1], LIBELLES_GROUPES.get(groupe, groupe), couleur)
-        )
-    ax.axhline(100, color=ENCRE_SECONDAIRE, lw=0.8)
-    ax.axvspan(2019.5, 2020.5, color=GRILLE, alpha=0.6, lw=0)
-    ax.set_xlim(right=serie.index.max() + 0.4)
-    ax.set(title=titre, xlabel="Année", ylabel=ylabel)
-    _etiquettes_fin(ax, points)
-    _legende_dessous(ax)
-    return ax
-
-
 def tracer_evenement(evenement: pd.DataFrame, ax=None):
     """G5 : indice moyen par département selon l'année relative au relèvement, par groupe."""
     ax = ax or plt.subplots(figsize=(11, 5))[1]

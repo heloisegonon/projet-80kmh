@@ -1,6 +1,6 @@
 """Statistiques descriptives sur le panel départemental mensuel.
 
-Lit data/processed/panel_dep.parquet (produit par scripts/indicateurs.py) et calcule :
+À partir du panel produit par scripts/indicateurs.py, calcule :
 
 - l'évolution nationale des tués sur le réseau 80 et sur le réseau témoin ;
 - les taux annuels pour 100 000 habitants par groupe (G80 / G90_partiel / G90_total) ;
@@ -8,14 +8,8 @@ Lit data/processed/panel_dep.parquet (produit par scripts/indicateurs.py) et cal
   à l'évolution des départements restés à 80 km/h sur les mêmes mois.
 """
 
-from pathlib import Path
-
 import pandas as pd
 
-RACINE = Path(__file__).resolve().parents[1]
-CHEMIN_PANEL = RACINE / "data" / "processed" / "panel_dep.parquet"
-
-GROUPES = ["G80", "G90_partiel", "G90_total"]
 ANNEES_REFERENCE = [2015, 2016, 2017]  # trois années pleines avant le 80 km/h
 DEBUT_80 = pd.Timestamp("2018-07-01")
 FIN_PANEL = pd.Timestamp("2024-12-01")
@@ -23,15 +17,6 @@ FIN_PANEL = pd.Timestamp("2024-12-01")
 MOIS_CONFINEMENT = pd.to_datetime(["2020-03-01", "2020-04-01", "2020-05-01", "2020-11-01"])
 COMPTAGES = ["accidents_80", "tues_80", "victimes_graves_80",
              "accidents_temoin", "tues_temoin", "victimes_graves_temoin"]
-
-
-def charger_panel(chemin: Path = CHEMIN_PANEL) -> pd.DataFrame:
-    """Charge le panel ; indique quels scripts lancer s'il n'existe pas encore."""
-    if not Path(chemin).exists():
-        raise FileNotFoundError(
-            f"{chemin} introuvable : lancer scripts/clean_data.py puis scripts/indicateurs.py"
-        )
-    return pd.read_parquet(chemin)
 
 
 def verifier_panel(panel: pd.DataFrame) -> pd.Series:
@@ -73,25 +58,6 @@ def bilan_national(panel: pd.DataFrame) -> pd.DataFrame:
     reference = annuel.loc[annuel.index.isin(ANNEES_REFERENCE)].mean()
     indices = (100 * annuel / reference).add_prefix("indice_")
     return annuel.join(indices)
-
-
-def taux_par_groupe(panel: pd.DataFrame, variable: str = "tues_80") -> pd.DataFrame:
-    """Taux annuel pour 100 000 habitants par groupe (total des victimes / total des habitants)."""
-    dep_an = par_dep_annee(panel).dropna(subset=["population"])
-    totaux = dep_an.groupby(["annee", "groupe"])[[variable, "population"]].sum()
-    taux = 100_000 * totaux[variable] / totaux["population"]
-    return taux.unstack("groupe").reindex(columns=GROUPES)
-
-
-def ecart_au_groupe_80(taux: pd.DataFrame) -> pd.DataFrame:
-    """Rapport du taux de chaque groupe à celui de G80, base 100 = moyenne 2015-2017.
-
-    Une courbe qui monte après 2020 signifie que le groupe s'éloigne des
-    départements restés à 80 km/h, dans le sens d'une hausse relative.
-    """
-    rapport = taux.div(taux["G80"], axis=0)
-    reference = rapport.loc[rapport.index.isin(ANNEES_REFERENCE)].mean()
-    return 100 * rapport / reference
 
 
 def _somme_entre(serie: pd.Series, debut: pd.Timestamp, fin: pd.Timestamp) -> float:
@@ -165,12 +131,3 @@ def synthese_avant_apres(tableau: pd.DataFrame) -> pd.DataFrame:
     synthese = _ajouter_evolutions(sommes)
     synthese.insert(0, "nb_departements", tableau.groupby("groupe").size())
     return synthese.round(1)
-
-
-if __name__ == "__main__":
-    panel = charger_panel()
-    print(verifier_panel(panel), "\n")
-    print(bilan_national(panel)[["tues_80", "tues_temoin", "indice_tues_80",
-                                 "indice_tues_temoin", "indice_carburants_routiers_m3"]].round(1), "\n")
-    print(ecart_au_groupe_80(taux_par_groupe(panel)).round(1), "\n")
-    print(synthese_avant_apres(avant_apres_releve(panel)))
