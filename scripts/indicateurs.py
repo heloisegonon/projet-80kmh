@@ -625,6 +625,78 @@ def tableau_robustesse(panel: pd.DataFrame, variable: str = "tues_rd", fenetre: 
     return robustesse
 
 
+# --- Q3 : radars fixes -------------------------------------------------------------------
+
+
+def accidents_autour_radars(
+    accidents: pd.DataFrame,
+    radars: pd.DataFrame,
+    rayon_m: float = 1000,
+    fenetre_ans: int = 2,
+    mise_en_service: tuple[str, str] = ("2020-01-01", "2022-12-31"),
+) -> pd.DataFrame:
+    """Compte les accidents à moins de ``rayon_m`` de chaque radar, avant et après sa mise en service (Q3).
+
+    Pour neutraliser la tendance nationale (Covid, baisse générale), chaque radar
+    reçoit un nombre « attendu » après mise en service : ses accidents d'avant,
+    multipliés par l'évolution nationale entre les deux mêmes fenêtres.
+
+    Les radars des années 2020-2022 sont retenus par défaut : les coordonnées des
+    accidents ne sont complètes qu'à partir de 2018, et la base s'arrête en 2024.
+
+    Parameters
+    ----------
+    accidents : pd.DataFrame
+        Sortie de ``clean_data.build_dataset`` (colonnes ``Num_Acc``, ``date``, ``lat``, ``long``).
+    radars : pd.DataFrame
+        Sortie de ``collecte.charger_radars``.
+    rayon_m : float
+        Rayon de la zone autour de chaque radar, en mètres.
+    fenetre_ans : int
+        Durée des fenêtres avant et après la mise en service, en années.
+    mise_en_service : tuple[str, str]
+        Bornes des dates de mise en service retenues.
+
+    Returns
+    -------
+    pd.DataFrame
+        Une ligne par radar : ``avant``, ``apres``, ``attendu_apres``.
+    """
+    import geopandas as gpd
+
+    debut, fin = map(pd.Timestamp, mise_en_service)
+    rad = radars[radars["date_mise_en_service"].between(debut, fin)].dropna(subset=["lat", "lon"])
+    rad = rad[rad["lat"].between(41, 51.5) & rad["lon"].between(-5.5, 10)]
+    acc = accidents.dropna(subset=["lat", "long", "date"])
+    points_acc = gpd.GeoDataFrame(
+        acc[["Num_Acc", "date"]], geometry=gpd.points_from_xy(acc["long"], acc["lat"]), crs=4326
+    ).to_crs(2154)
+    zones = gpd.GeoDataFrame(
+        rad[["id_radar", "type_radar", "date_mise_en_service"]],
+        geometry=gpd.points_from_xy(rad["lon"], rad["lat"]),
+        crs=4326,
+    ).to_crs(2154)
+    zones["geometry"] = zones.buffer(rayon_m)
+    proches = gpd.sjoin(points_acc, zones, predicate="within")
+
+    fenetre = pd.DateOffset(years=fenetre_ans)
+    mes = proches["date_mise_en_service"]
+    proches["avant"] = proches["date"].between(mes - fenetre, mes, inclusive="left")
+    proches["apres"] = proches["date"].between(mes, mes + fenetre, inclusive="right")
+    comptes = proches.groupby("id_radar")[["avant", "apres"]].sum()
+    resultat = zones.drop(columns="geometry").set_index("id_radar").join(comptes).fillna(0)
+
+    # Évolution nationale des accidents entre les deux fenêtres de chaque radar.
+    par_jour = acc.groupby("date").size()
+    cumul = par_jour.cumsum()
+
+    def total(debut_fen, fin_fen):
+        return cumul.asof(fin_fen) - cumul.asof(debut_fen)
+
+    tendance = [total(d, d + fenetre) / total(d - fenetre, d) for d in resultat["date_mise_en_service"]]
+    resultat["attendu_apres"] = resultat["avant"] * np.array(tendance)
+    return resultat.reset_index()
+
 
 if __name__ == "__main__":
     accidents = pd.read_parquet(DOSSIER_PROCESSED / "accidents.parquet")
