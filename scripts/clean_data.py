@@ -17,7 +17,6 @@ RAW_BAAC_DIR = ROOT_DIR / "data" / "raw" / "baac"
 PROCESSED_DATA_DIR = ROOT_DIR / "data" / "processed"
 
 YEARS = range(2010, 2025)
-DATE_REFORME = pd.Timestamp("2018-07-01")
 
 CARAC_COLUMNS = ["Num_Acc", "annee", "date", "heure", "lum", "agg",
                  "int", "atm", "col", "dep", "lat", "long"]
@@ -56,7 +55,7 @@ def clean_departement(dep: pd.Series) -> pd.Series:
     dep = dep.str.upper()
     dep = dep.replace({"201": "2A", "202": "2B"})
     old_format = dep.str.len().eq(3) & dep.str.endswith("0")
-    return dep.where(~old_format, dep.str[:2])
+    return dep.where(~old_format, dep.str[:2]).str.zfill(2)
 
 
 def clean_caracteristiques(df: pd.DataFrame, year: int) -> pd.DataFrame:
@@ -176,7 +175,6 @@ def build_dataset(years: range = YEARS) -> pd.DataFrame:
 
     # Périmètre de contrôle ONISR : hors agglomération (agg == 1) et hors autoroute (catr != 1)
     accidents["hors_agg_hors_autoroute"] = accidents["agg"].eq(1) & accidents["catr"].ne(1)
-    accidents["apres_reforme"] = accidents["date"] >= DATE_REFORME
 
     return accidents
 
