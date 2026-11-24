@@ -238,7 +238,7 @@ def tracer_calendrier(groupes: pd.DataFrame, ax=None):
 def tracer_series_groupes_ic(serie: pd.DataFrame, titre: str, ylabel: str, ax=None):
     """G4 : indice par groupe (base 100) avec intervalle de Poisson à 95 % en bande.
 
-    ``serie`` est la sortie de :func:`src.indicateurs.serie_groupes_ic`.
+    ``serie`` est la sortie de :func:`indicateurs.serie_groupes_ic`.
     """
     ax = ax or plt.subplots(figsize=(11, 5.5))[1]
     points = []
@@ -325,7 +325,7 @@ def tracer_evenement(evenement: pd.DataFrame, ax=None):
 def tracer_evolution_categories(tableau: pd.DataFrame, categorie: str, libelles: dict, titre: str, ax=None):
     """G6 : évolution des tués (après / avant, en %) par catégorie et par groupe, en barres groupées.
 
-    ``tableau`` est la sortie de :func:`src.indicateurs.evolution_par_categorie`.
+    ``tableau`` est la sortie de :func:`indicateurs.evolution_par_categorie`.
     Chaque catégorie affiche le nombre de tués par an avant, pour situer son poids.
     """
     categories = [c for c in libelles if c in set(tableau[categorie])]
