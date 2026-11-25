@@ -625,6 +625,55 @@ def tableau_robustesse(panel: pd.DataFrame, variable: str = "tues_rd", fenetre: 
     return robustesse
 
 
+# --- Comparaison avec l'évaluation ONISR (section 5.1) -----------------------------------
+
+
+def comparaison_onisr(groupes: pd.DataFrame, par_typologie: bool = False) -> pd.DataFrame:
+    """Refait le tableau 2019 / 2022 de l'ONISR avec deux définitions des groupes.
+
+    L'indicateur est celui de l'ONISR : tués hors agglomération et hors autoroute en 2019
+    et en 2022 (colonnes ``tues_ha_2019_onisr`` et ``tues_ha_2022_onisr``, que nos BAAC
+    retrouvent exactement). Deux regroupements sont comparés :
+
+    - « ONISR » : relevés avant fin 2022 contre les autres départements ;
+    - « Projet » : nos groupes ``G80`` / ``G90_partiel`` / ``G90_total`` (relevés avant fin 2024).
+
+    Contrairement à l'ONISR, un département relevé en 2022 compte pour l'année entière
+    dans le groupe relevé.
+
+    Parameters
+    ----------
+    groupes : pd.DataFrame
+        Sortie de :func:`affecter_groupes`.
+    par_typologie : bool
+        Détaille chaque groupe par typologie Cerema.
+
+    Returns
+    -------
+    pd.DataFrame
+        Départements, tués 2019 et 2022, évolution en nombre et en %.
+    """
+    dep = groupes.copy()
+    releve_2022 = dep["releve"] & (pd.to_datetime(dep["date_releve"]) <= pd.Timestamp("2022-12-31"))
+    regroupements = {
+        "ONISR (relevés avant fin 2022)": np.where(releve_2022, "Groupe 90", "Groupe 80"),
+        "Projet (relevés avant fin 2024)": dep["groupe"],
+    }
+    tableaux = []
+    for nom, groupe in regroupements.items():
+        cles = [groupe, dep["typologie_cerema"]] if par_typologie else [groupe]
+        tableau = dep.groupby(cles).agg(
+            departements=("code_dep", "size"),
+            tues_2019=("tues_ha_2019_onisr", "sum"),
+            tues_2022=("tues_ha_2022_onisr", "sum"),
+        )
+        tableaux.append(pd.concat({nom: tableau}, names=["regroupement"]))
+    resultat = pd.concat(tableaux)
+    resultat.index = resultat.index.set_names("groupe", level=1)
+    resultat["evolution"] = resultat["tues_2022"] - resultat["tues_2019"]
+    resultat["evolution_pct"] = 100 * resultat["evolution"] / resultat["tues_2019"]
+    return resultat.round(1)
+
 
 if __name__ == "__main__":
     accidents = pd.read_parquet(DOSSIER_PROCESSED / "accidents.parquet")
