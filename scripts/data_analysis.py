@@ -78,7 +78,8 @@ def avant_apres_releve(panel: pd.DataFrame, fenetre: int = 24,
     """
     panel = panel[~panel["date_mois"].isin(MOIS_CONFINEMENT)]
     temoin_g80 = panel[panel["groupe"] == "G80"].groupby("date_mois")[variable].sum()
-    reseau_temoin = variable.replace("_80", "_temoin")
+    # Même mesure sur le réseau témoin : tues_rd et tues_80 -> tues_temoin
+    reseau_temoin = variable.rsplit("_", 1)[0] + "_temoin"
 
     lignes = []
     traites = panel[panel["date_releve_eff"].notna()]
