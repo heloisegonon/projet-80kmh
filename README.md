@@ -2,7 +2,7 @@
 
 Projet *Python pour la data science*, ENSAE 2e année (2026-2027), cours de Lino Galiana.
 
-> **État : brouillon.** La collecte, le nettoyage, le panel départemental et la structure du rapport sont en place ; l'analyse et la rédaction sont en cours. Le cadrage complet est dans [`docs/plan_projet.md`](docs/plan_projet.md).
+> **État : version finale.** Le rapport complet est dans [`main.ipynb`](main.ipynb) ; le cadrage initial du projet est dans [`docs/plan_projet.md`](docs/plan_projet.md).
 
 ## Problématique
 
@@ -23,32 +23,63 @@ Seule la table des relèvements est versionnée, avec la liste de secours des UR
 
 ## Reproduire les résultats
 
+### Première fois
+
+1. **Vérifier la version de Python** : `python3 --version` doit afficher 3.11 ou plus. Python n'est pas installé par le projet. Sur Mac, le `python3` fourni par Apple est parfois en version 3.9, avec laquelle le code ne fonctionne pas : installer une version récente, par exemple avec `brew install python@3.12`, puis utiliser `python3.12` à la place de `python3`.
+
+2. **Récupérer le projet, créer l'environnement virtuel et installer les bibliothèques** :
+
+   ```bash
+   git clone https://github.com/heloisegonon/projet-80kmh.git
+   cd projet-80kmh
+   python3 -m venv .venv
+   source .venv/bin/activate
+   pip install -r requirements.txt
+   ```
+
+   `pip` télécharge toutes les bibliothèques de `requirements.txt` (pandas, geopandas, Jupyter…) et leurs dépendances dans le dossier `.venv`, sans toucher au reste de la machine. Une connexion internet est nécessaire.
+
+3. **Exécuter le notebook** : ouvrir `main.ipynb` **avec le noyau de l'environnement `.venv`** et lancer « Exécuter tout ». Dans VS Code, choisir `.venv` en haut à droite du notebook ; dans Jupyter, lancer `.venv/bin/jupyter lab`. Si un autre Jupyter est déjà installé sur la machine, il peut exécuter le notebook hors de l'environnement du projet et échouer sur `Missing optional dependency 'pyarrow'`. Pour tout exécuter sans ouvrir le notebook (le résultat est écrit dans `main_execute.ipynb`) :
+
+   ```bash
+   .venv/bin/jupyter nbconvert --to notebook --execute main.ipynb --output main_execute.ipynb --ExecutePreprocessor.timeout=3600
+   ```
+
+Le notebook enchaîne seul toutes les étapes : il télécharge les données, nettoie les BAAC, construit le panel, puis produit l'analyse et les graphiques. **Il n'y a aucun script à lancer à la main.**
+
+**Durée.** Au premier lancement, le téléchargement (environ 330 Mo de fichiers BAAC), le nettoyage et la construction du panel prennent environ **4 minutes** (3 min 40 s mesurées sur un MacBook Air, avec l'installation des dépendances en 30 secondes en plus).
+
+### Lancements suivants
+
+Il suffit de revenir dans le dossier du projet et de réactiver l'environnement, sans rien réinstaller :
+
 ```bash
-git clone https://github.com/heloisegonon/projet-80kmh.git
 cd projet-80kmh
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+source .venv/bin/activate
 ```
 
-Puis ouvrir `main.ipynb` et lancer « Exécuter tout » : au premier lancement, le notebook télécharge les données, les nettoie et construit le panel, puis relit les fichiers de `data/processed/` aux lancements suivants.
+puis de relancer le notebook (étape 3). Il relit les fichiers déjà construits dans `data/processed/` et ne retélécharge rien.
 
-Chaque étape peut aussi se lancer séparément, depuis la racine du projet :
+### Lancer une étape seule (facultatif)
+
+Pour exécuter ou déboguer une étape isolément, les scripts se lancent depuis la racine du projet, **avec l'environnement `.venv` activé**, dans cet ordre (chacun utilise le fichier produit par le précédent) :
+
+| Commande | Rôle |
+|---|---|
+| `python scripts/collecte.py` | télécharge les fichiers BAAC dans `data/raw/baac/` |
+| `python scripts/clean_data.py` | nettoie et fusionne les 4 tables : `data/processed/accidents.parquet` |
+| `python scripts/indicateurs.py` | construit le panel : `data/processed/panel_dep.parquet` |
+| `python scripts/data_analysis.py` | statistiques descriptives sur le panel |
+
+### En cas de problème
+
+**Erreur de connexion (`ConnectionError`, `Connection refused`).** Les requêtes sont relancées automatiquement 5 fois. Si l'API de data.gouv.fr reste injoignable, le code utilise la liste versionnée des URL des fichiers ([`data/sources_baac.csv`](data/sources_baac.csv)), hébergés sur `static.data.gouv.fr`. Les données de contexte (population, carburants, radars, contours) sont recopiées dans `data/processed/contexte/` après chaque téléchargement réussi, et relues avec un avertissement `UserWarning` si la source en ligne ne répond plus. Si l'erreur persiste, c'est le réseau de la machine qui bloque l'accès. Pour le vérifier, la commande suivante doit afficher `200` (`000` signifie que la connexion est refusée ou bloquée) :
 
 ```bash
-python scripts/collecte.py        # télécharge les fichiers BAAC dans data/raw/baac/
-python scripts/clean_data.py      # nettoie et fusionne les 4 tables : data/processed/accidents.parquet
-python scripts/indicateurs.py     # construit le panel : data/processed/panel_dep.parquet
-python scripts/data_analysis.py   # statistiques descriptives sur le panel
-```
-
-**Erreur de connexion (`ConnectionError`, `Connection refused`).** Les requêtes sont relancées automatiquement 5 fois. Si l'API de data.gouv.fr reste injoignable, le code utilise la liste versionnée des URL des fichiers ([`data/sources_baac.csv`](data/sources_baac.csv)), hébergés sur `static.data.gouv.fr`. Les données de contexte (population, carburants, radars, contours) sont recopiées dans `data/processed/contexte/` après chaque téléchargement réussi, et relues avec un avertissement si la source en ligne ne répond plus. Si l'erreur persiste, c'est le réseau de la machine qui bloque l'accès. Pour vérifier :
-
-```bash
-# doit afficher 200 ; « 000 » signifie que la connexion est refusée ou bloquée
 curl -s -o /dev/null -w "%{http_code}\n" "$(sed -n 2p data/sources_baac.csv | cut -d, -f3)"
-# un réseau d'école ou d'entreprise impose souvent un proxy (variables HTTPS_PROXY)
-env | grep -i proxy
 ```
+
+Sur un réseau d'école ou d'entreprise, un proxy est souvent nécessaire : `env | grep -i proxy` affiche celui qui est configuré.
 
 ## Organisation
 
