@@ -2,7 +2,7 @@
 
 Projet *Python pour la data science*, ENSAE 2e année (2026-2027), cours de Lino Galiana.
 
-> **État : brouillon.** La collecte, le nettoyage, le panel départemental et la structure du rapport sont en place ; l'analyse et la rédaction sont en cours. Le cadrage complet est dans [`docs/plan_projet.md`](docs/plan_projet.md).
+> **État : version finale.** Le rapport complet est dans [`main.ipynb`](main.ipynb) ; le cadrage initial du projet est dans [`docs/plan_projet.md`](docs/plan_projet.md).
 
 ## Problématique
 
