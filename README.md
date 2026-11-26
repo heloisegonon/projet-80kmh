@@ -73,3 +73,15 @@ env | grep -i proxy
 
 - Branche par fonctionnalité, fusion dans `main` par pull request relue.
 - Formatage : `ruff format scripts/`.
+
+
+## Usage de l'intelligence artificielle
+
+Le cours autorise les assistants de code, à condition que le travail reste le nôtre. Nous avons utilisé un assistant d'IA à plusieurs étapes du projet :
+
+- **Recherche** : identifier les sources utiles (évaluations du Cerema et de l'ONISR, données publiques) et vérifier certains faits sur le contexte de la réforme.
+- **Code** : propositions pour certaines fonctions (par exemple les statistiques descriptives et la comparaison avant / après relèvement de `scripts/data_analysis.py`), que nous avons relues, testées sur nos données et adaptées, ainsi qu'une aide au débogage et à l'utilisation de `git`.
+- **Interprétation** : aide à la rédaction des commentaires de résultats, pour n'oublier aucun élément important des graphiques et des tableaux.
+- **Vérification**, surtout : contrôle de nos interprétations, en confrontant chaque chiffre cité aux sorties du notebook et chaque conclusion aux résultats des autres sections, pour nous assurer qu'elles étaient justes et cohérentes entre elles.
+
+Ces vérifications nous ont permis de corriger plusieurs erreurs, dont une venant d'une proposition de l'IA : le réseau témoin de `avant_apres_releve` était mal défini pour les routes départementales (corrigé dans la pull request n° 9). Nous ne nous sommes pas reposés sur l'IA pour valider nos données : nos comptages de tués sont d'abord contrôlés contre les chiffres officiels de l'ONISR (section 2.3 du notebook).
