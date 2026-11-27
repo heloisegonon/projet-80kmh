@@ -2,6 +2,8 @@
 
 Projet *Python pour la data science*, ENSAE 2e année (2026-2027), cours de Lino Galiana.
 
+> **Rapport en ligne : [heloisegonon.github.io/projet-80kmh](https://heloisegonon.github.io/projet-80kmh/)** — le notebook mis en page avec Quarto, avec tous les graphiques et tableaux.
+>
 > **État : version finale.** Le rapport complet est dans [`main.ipynb`](main.ipynb) ; le cadrage initial du projet est dans [`docs/plan_projet.md`](docs/plan_projet.md).
 
 ## Problématique
