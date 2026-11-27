@@ -1,12 +1,7 @@
-"""Statistiques descriptives sur le panel départemental mensuel.
-
-À partir du panel produit par scripts/indicateurs.py, calcule :
-
-- l'évolution nationale des tués sur le réseau 80 et sur le réseau témoin ;
-- les taux annuels pour 100 000 habitants par groupe (G80 / G90_partiel / G90_total) ;
-- une comparaison avant / après relèvement, département par département, rapportée
-  à l'évolution des départements restés à 80 km/h sur les mêmes mois.
-"""
+# Statistiques descriptives sur le panel départemental mensuel. À partir du panel produit par scripts/indicateurs.py, calcule :
+# - l'évolution nationale des tués sur le réseau 80 et sur le réseau témoin ;
+# - les taux annuels pour 100 000 habitants par groupe (G80 / G90_partiel / G90_total) ;
+# - une comparaison avant / après relèvement, département par département, rapportée à l'évolution des départements restés à 80 km/h sur les mêmes mois.
 
 import pandas as pd
 
