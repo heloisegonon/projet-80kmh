@@ -1,13 +1,6 @@
-"""Fonctions de visualisation réutilisables par le rapport.
-
-Palette : trois couleurs catégorielles validées pour le daltonisme (bleu, orange,
-vert d'eau), toujours dans le même ordre et toujours associées au même groupe ;
-une rampe bleue pour les intensités (cartes, heatmap) ; un couple bleu/rouge
-autour d'un gris neutre pour les évolutions (baisse / hausse).
-"""
+# Fonctions de visualisation réutilisables par le rapport
 
 from __future__ import annotations
-
 import matplotlib as mpl
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
@@ -73,7 +66,6 @@ def appliquer_style() -> None:
 
 def _etiquettes_fin(ax, points: list[tuple]) -> None:
     """Étiquettes directes en bout de courbe, écartées verticalement pour ne pas se chevaucher.
-
     ``points`` : liste de ``(x, y, texte, couleur)``. À appeler une fois les limites de l'axe fixées.
     La pastille reste sur la vraie valeur ; seul le texte est décalé. Le texte est en encre,
     la couleur de la série n'est portée que par la pastille.
@@ -109,7 +101,7 @@ def _repere_vertical(ax, x, texte: str) -> None:
     )
 
 
-# --- 7.1 Description de la base --------------------------------------------------
+# 7.1 Description de la base
 
 
 def tracer_description_annuelle(controle: pd.DataFrame):
@@ -157,19 +149,11 @@ def heatmap_manquants(manquants: pd.DataFrame, ax=None):
     return ax
 
 
-# --- G1 à G5 ------------------------------------------------------------------------
+# G1 à G5
 
 
 def tracer_mensuel_reseau(mensuel: pd.DataFrame, ax=None, fenetre: int = 12):
-    """G1 : tués par mois sur le réseau concerné et les autres réseaux (moyenne mobile).
-
-    Parameters
-    ----------
-    mensuel : pd.DataFrame
-        Index = mois, colonnes = ``True`` (réseau concerné) / ``False`` (autres réseaux).
-    fenetre : int
-        Largeur de la moyenne mobile en mois.
-    """
+    """G1 : tués par mois sur le réseau concerné et les autres réseaux (moyenne mobile)."""
     ax = ax or plt.subplots(figsize=(12, 5))[1]
     libelles = {True: "Réseau concerné par le 80 km/h", False: "Autres réseaux"}
     points = []
@@ -237,7 +221,6 @@ def tracer_calendrier(groupes: pd.DataFrame, ax=None):
 
 def tracer_series_groupes_ic(serie: pd.DataFrame, titre: str, ylabel: str, ax=None):
     """G4 : indice par groupe (base 100) avec intervalle de Poisson à 95 % en bande.
-
     ``serie`` est la sortie de :func:`indicateurs.serie_groupes_ic`.
     """
     ax = ax or plt.subplots(figsize=(11, 5.5))[1]
@@ -298,12 +281,11 @@ def tracer_evenement(evenement: pd.DataFrame, ax=None):
     return ax
 
 
-# --- G6 : évolution par catégorie (H4) ---------------------------------------------------
+# G6 : évolution par catégorie (H4)
 
 
 def tracer_evolution_categories(tableau: pd.DataFrame, categorie: str, libelles: dict, titre: str, ax=None):
     """G6 : évolution des tués (après / avant, en %) par catégorie et par groupe, en barres groupées.
-
     ``tableau`` est la sortie de :func:`indicateurs.evolution_par_categorie`.
     Chaque catégorie affiche le nombre de tués par an avant, pour situer son poids.
     """
@@ -349,7 +331,7 @@ def tracer_evolution_categories(tableau: pd.DataFrame, categorie: str, libelles:
     return ax
 
 
-# --- G7 : cartes avant / après ------------------------------------------------------------
+# G7 : cartes avant / après
 
 
 def cartes_avant_apres(contours, taux: pd.DataFrame, limite_evolution: float = 60):
@@ -405,7 +387,7 @@ def cartes_avant_apres(contours, taux: pd.DataFrame, limite_evolution: float = 6
     return fig
 
 
-# --- Robustesse et radars -------------------------------------------------------------------
+# Robustesse et radars
 
 
 def tracer_robustesse(robustesse: pd.DataFrame, ax=None):
