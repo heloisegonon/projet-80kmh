@@ -8,6 +8,16 @@ Projet *Python pour la data science*, ENSAE 2e année (2026-2027), cours de Lino
 
 Le 1er juillet 2018, la vitesse maximale est passée de 90 à 80 km/h sur les routes bidirectionnelles hors agglomération. Depuis la loi d'orientation des mobilités (décembre 2019), les départements peuvent revenir aux 90 km/h : 50 l'avaient fait fin 2024, à des dates et sur des linéaires très différents. Nous exploitons cette expérience naturelle pour mesurer l'effet de la vitesse autorisée sur la mortalité routière.
 
+## Résultats principaux
+
+- **Données validées.** De 2017 à 2024, nos tués en métropole sont identiques, année par année, aux chiffres publiés par l'ONISR. Ce contrôle a permis de corriger une erreur de codage des départements dans le fichier de 2019.
+- **H1, le passage à 80 km/h (2018) : effet plausible mais modeste.** En 2019, à trafic constant, les tués baissent de 9 % sur le réseau concerné par rapport à 2015-2017, soit 2 à 4 points de plus que sur les autres réseaux. Cet écart est du même ordre qu'un biais de codage des BAAC en 2019, et bien plus faible que l'effet estimé par le Cerema (−12 %).
+- **H2, le retour aux 90 km/h : pas démontré.** Sur les mêmes mois, les départements relevés font un peu moins bien que ceux restés à 80 km/h (+14 points en différence de différences, intervalle approché de 4 à 24). Le résultat dépend des dates de relèvement : en les avançant de six mois, l'écart tombe à +2 points.
+- **H3, l'intensité du relèvement : compatible, non démontrée.** Les 8 départements relevés en totalité s'écartent nettement de ceux restés à 80 km/h (+48 points), dans toutes nos approches. Mais ils sont presque tous de montagne, ne comptent qu'une centaine de tués, et leurs routes non relevées se dégradent encore plus (+57 %) : l'écart vient probablement en partie, voire en totalité, de facteurs locaux.
+- **H4, le mécanisme par les chocs frontaux et les sorties de route : non confirmée.** Les collisions frontales baissent autant ou davantage dans les départements relevés que dans ceux restés à 80 km/h. Seule la hausse des sorties de route dans les départements à relèvement partiel (+19 %, contre +2 %) va dans le sens de cette hypothèse.
+
+En résumé, le retour aux 90 km/h coïncide avec une évolution moins favorable de la mortalité là où il a été le plus large, mais nos données ne permettent pas de l'attribuer au relèvement plutôt qu'aux spécificités des départements concernés.
+
 ## Données
 
 | Source | Accès | Usage |
