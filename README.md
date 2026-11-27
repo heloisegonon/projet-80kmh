@@ -1,4 +1,4 @@
-# 80 km/h, retour aux 90 km/h et radars : quel effet sur la mortalité routière ?
+# 80 km/h, retour aux 90 km/h : quel effet sur la mortalité routière ?
 
 Projet *Python pour la data science*, ENSAE 2e année (2026-2027), cours de Lino Galiana.
 
@@ -17,6 +17,7 @@ Le 1er juillet 2018, la vitesse maximale est passée de 90 à 80 km/h sur les ro
 - **H2, le retour aux 90 km/h : pas démontré.** Sur les mêmes mois, les départements relevés font un peu moins bien que ceux restés à 80 km/h (+14 points en différence de différences, intervalle approché de 4 à 24). Le résultat dépend des dates de relèvement : en les avançant de six mois, l'écart tombe à +2 points.
 - **H3, l'intensité du relèvement : compatible, non démontrée.** Les 8 départements relevés en totalité s'écartent nettement de ceux restés à 80 km/h (+48 points), dans toutes nos approches. Mais ils sont presque tous de montagne, ne comptent qu'une centaine de tués, et leurs routes non relevées se dégradent encore plus (+57 %) : l'écart vient probablement en partie, voire en totalité, de facteurs locaux.
 - **H4, le mécanisme par les chocs frontaux et les sorties de route : non confirmée.** Les collisions frontales baissent autant ou davantage dans les départements relevés que dans ceux restés à 80 km/h. Seule la hausse des sorties de route dans les départements à relèvement partiel (+19 %, contre +2 %) va dans le sens de cette hypothèse.
+- **Radars fixes (Q3, piste exploratoire) : non concluant.** Autour des 924 radars mis en service en 2020-2022, les accidents baissent de 3 % en deux ans, contre une hausse d'environ 1 % attendue d'après la tendance nationale. Mais l'écart médian par radar est nul et la régression vers la moyenne domine : cette piste n'a pas été retenue dans le rapport.
 
 En résumé, le retour aux 90 km/h coïncide avec une évolution moins favorable de la mortalité là où il a été le plus large, mais nos données ne permettent pas de l'attribuer au relèvement plutôt qu'aux spécificités des départements concernés.
 
@@ -29,7 +30,7 @@ En résumé, le retour aux 90 km/h coïncide avec une évolution moins favorable
 | Population au 1er janvier par département (INSEE) | API Melodi | Taux par habitant |
 | Ventes de carburants routiers par département (SDES) | API DiDo | Indicateur indirect du trafic |
 | Contours des départements (IGN) | `cartiflette` | Cartes |
-| Radars fixes (ministère de l'Intérieur) | API data.gouv.fr | Radars actifs par département et par mois |
+| Radars fixes (ministère de l'Intérieur) | API data.gouv.fr | Question Q3, explorée mais non retenue |
 
 Seule la table des relèvements est versionnée, avec la liste de secours des URL des fichiers BAAC ([`data/sources_baac.csv`](data/sources_baac.csv)). Tout le reste est téléchargé par le code.
 
@@ -103,13 +104,13 @@ Sur un réseau d'école ou d'entreprise, un proxy est souvent nécessaire : `env
 │   ├── plan_projet.md          # cadrage du projet
 │   └── collecte_departements.md
 ├── scripts/
-│   ├── collecte.py             # API data.gouv, INSEE, SDES, cartiflette, S3
+│   ├── collecte.py             # API data.gouv, INSEE, SDES, cartiflette
 │   ├── clean_data.py           # nettoyage et fusion des BAAC 2010-2024
 │   ├── indicateurs.py          # groupes G80 / G90, panel département × mois, étude d'événement, différence de différences
 │   ├── data_analysis.py        # statistiques descriptives, avant / après relèvement
 │   └── graphiques.py           # palette et fonctions de visualisation du rapport
 ├── main.ipynb                  # le rapport
-└── pyproject.toml
+└── requirements.txt            # dépendances
 ```
 
 ## Conventions

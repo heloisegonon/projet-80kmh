@@ -1,18 +1,23 @@
-# Collecte des données brutes depuis les sources publiques.
-# Toutes les données sont récupérées par le code à partir d'URL publiques :
-# - BAAC (accidents corporels) et radars fixes : API de data.gouv.fr ;
-# - population départementale : API Melodi de l'INSEE (sans clé) ;
-# - consommation de carburants par département : API DiDo du SDES ;
-# - contours des départements : ``cartiflette``.
-# Les fichiers téléchargés sont mis en cache dans ``data/raw/`` (non versionné).
+"""Collecte des données brutes depuis les sources publiques.
+
+Toutes les données sont récupérées par le code à partir d'URL publiques :
+
+- BAAC (accidents corporels) et radars fixes : API de data.gouv.fr ;
+- population départementale : API Melodi de l'INSEE (sans clé) ;
+- consommation de carburants par département : API DiDo du SDES ;
+- contours des départements : ``cartiflette``.
+
+Les fichiers téléchargés sont mis en cache dans ``data/raw/`` (non versionné).
+"""
 
 from __future__ import annotations
+
 import io
-import os
 import re
 import warnings
 from functools import cache, wraps
 from pathlib import Path
+
 import pandas as pd
 import requests
 from requests.adapters import HTTPAdapter
@@ -65,6 +70,7 @@ CARBURANTS_ROUTIERS = [
 @cache
 def session() -> requests.Session:
     """Session HTTP qui relance automatiquement les requêtes en échec.
+
     Couvre les refus de connexion et erreurs serveur passagers (5 essais,
     attente croissante de 1 à 16 s).
     """
@@ -83,6 +89,7 @@ def session() -> requests.Session:
 
 def avec_cache_local(nom: str):
     """Garde une copie Parquet du résultat et la relit si la source en ligne échoue.
+
     Après chaque chargement réussi, le résultat est écrit dans
     ``data/processed/contexte/<nom>.parquet``. Si le chargement échoue (réseau
     bloqué, site en panne) et qu'une copie existe, elle est renvoyée avec un
@@ -117,7 +124,18 @@ def avec_cache_local(nom: str):
 
 
 def lister_ressources(dataset_id: str) -> pd.DataFrame:
-    """Renvoie les ressources d'un jeu de données data.gouv.fr."""
+    """Renvoie les ressources d'un jeu de données data.gouv.fr.
+
+    Parameters
+    ----------
+    dataset_id : str
+        Identifiant (ou slug) du jeu de données.
+
+    Returns
+    -------
+    pd.DataFrame
+        Une ligne par ressource : ``titre``, ``url``, ``format``, ``modifie``.
+    """
     reponse = session().get(API_DATAGOUV.format(dataset_id), timeout=30)
     reponse.raise_for_status()
     return pd.DataFrame(
@@ -135,10 +153,21 @@ def lister_ressources(dataset_id: str) -> pd.DataFrame:
 
 def lister_fichiers_baac(annees: range | list[int] = range(2010, 2025)) -> pd.DataFrame:
     """Liste les fichiers BAAC (4 tables par an) disponibles sur data.gouv.fr.
+
     Les fichiers « véhicules immatriculés » et les bases agrégées sont ignorés.
     Si une même table apparaît deux fois pour une année, la version la plus
     récente est conservée. Si l'API est injoignable, la liste versionnée
     ``data/sources_baac.csv`` est utilisée à la place.
+
+    Parameters
+    ----------
+    annees : iterable of int
+        Années à conserver.
+
+    Returns
+    -------
+    pd.DataFrame
+        Colonnes ``annee``, ``table``, ``url``, triées par année puis table.
     """
     try:
         ressources = lister_ressources(DATASET_BAAC)
@@ -174,7 +203,22 @@ def lister_fichiers_baac(annees: range | list[int] = range(2010, 2025)) -> pd.Da
 
 
 def telecharger(url: str, destination: Path, forcer: bool = False) -> Path:
-    """Télécharge un fichier si absent du cache local."""
+    """Télécharge un fichier si absent du cache local.
+
+    Parameters
+    ----------
+    url : str
+        Adresse du fichier.
+    destination : Path
+        Chemin local du fichier.
+    forcer : bool
+        Retélécharge même si le fichier existe déjà.
+
+    Returns
+    -------
+    Path
+        Chemin du fichier local.
+    """
     destination = Path(destination)
     if destination.exists() and not forcer:
         return destination
@@ -191,7 +235,13 @@ def telecharger(url: str, destination: Path, forcer: bool = False) -> Path:
 def telecharger_baac(
     annees: range | list[int] = range(2010, 2025), dossier: Path = DOSSIER_RAW / "baac"
 ) -> pd.DataFrame:
-    """Télécharge les 4 tables BAAC de chaque année dans ``dossier/<annee>/<table>.csv``."""
+    """Télécharge les 4 tables BAAC de chaque année dans ``dossier/<annee>/<table>.csv``.
+
+    Returns
+    -------
+    pd.DataFrame
+        La liste des fichiers avec une colonne ``chemin`` vers la copie locale.
+    """
     fichiers = lister_fichiers_baac(annees)
     fichiers["chemin"] = [
         telecharger(f.url, Path(dossier) / str(f.annee) / f"{f.table}.csv") for f in fichiers.itertuples()
@@ -201,7 +251,14 @@ def telecharger_baac(
 
 @avec_cache_local("radars")
 def charger_radars() -> pd.DataFrame:
-    """Charge la liste des radars fixes (dernière version publiée sur data.gouv.fr)."""
+    """Charge la liste des radars fixes (dernière version publiée sur data.gouv.fr).
+
+    Returns
+    -------
+    pd.DataFrame
+        Colonnes ``id_radar``, ``type_radar``, ``date_mise_en_service``, ``vma``,
+        ``lat``, ``lon``.
+    """
     try:
         ressources = lister_ressources(DATASET_RADARS).query("format == 'csv'")
         url = ressources.sort_values("modifie").iloc[-1]["url"]
@@ -221,7 +278,13 @@ def charger_radars() -> pd.DataFrame:
 
 @avec_cache_local("population")
 def charger_population() -> pd.DataFrame:
-    """Récupère la population au 1er janvier par département (INSEE, API Melodi)."""
+    """Récupère la population au 1er janvier par département (INSEE, API Melodi).
+
+    Returns
+    -------
+    pd.DataFrame
+        Colonnes ``code_dep``, ``annee``, ``population``.
+    """
     reponse = session().get(URL_MELODI_POPULATION, timeout=60)
     reponse.raise_for_status()
     observations = reponse.json()["observations"]
@@ -238,7 +301,13 @@ def charger_population() -> pd.DataFrame:
 @avec_cache_local("carburants")
 def charger_carburants() -> pd.DataFrame:
     """Récupère les ventes annuelles de carburants routiers par département (SDES).
+
     Sert d'indicateur indirect du trafic local, notamment pour neutraliser 2020.
+
+    Returns
+    -------
+    pd.DataFrame
+        Colonnes ``code_dep``, ``annee``, ``carburants_routiers_m3`` et le détail par produit.
     """
     reponse = session().get(URL_CARBURANTS_SDES, timeout=60)
     reponse.raise_for_status()

@@ -1,7 +1,13 @@
-# Construction du panel départemental mensuel et affectation des groupes (G80 / G90).
-# Croise data/processed/accidents.parquet avec data/departements_90.csv et les sources de contexte (population, carburants, radars) pour produire data/processed/panel_dep.parquet.
+"""
+Construction du panel départemental mensuel et affectation des groupes (G80 / G90).
+
+Croise data/processed/accidents.parquet avec data/departements_90.csv
+et les sources de contexte (population, carburants, radars) pour produire
+data/processed/panel_dep.parquet.
+"""
 
 from pathlib import Path
+
 import numpy as np
 import pandas as pd
 
@@ -56,7 +62,17 @@ LIBELLES_COLLISION = {
 
 
 def masque_perimetre(accidents: pd.DataFrame, perimetre: str) -> pd.Series:
-    """Renvoie un masque booléen (sans valeur manquante) des accidents du périmètre demandé."""
+    """Renvoie un masque booléen (sans valeur manquante) des accidents du périmètre demandé.
+
+    Parameters
+    ----------
+    accidents : pd.DataFrame
+        Sortie de ``clean_data.build_dataset``.
+    perimetre : str
+        ``"reseau_80"``, ``"rd"`` ou ``"temoin"`` (voir ``PERIMETRES``). Un accident dont
+        la catégorie de route, la localisation ou le régime de circulation est inconnu
+        n'appartient à aucun périmètre.
+    """
     if perimetre == "reseau_80":
         masque = accidents["reseau_80"]
     elif perimetre == "rd":
@@ -89,6 +105,7 @@ def _agreger_par_mois(acc: pd.DataFrame, suffixe: str) -> pd.DataFrame:
 
 def _intervalle_poisson(indice: pd.Series, effectif: pd.Series) -> tuple[pd.Series, pd.Series]:
     """Bornes à 95 % d'un indice calculé sur un comptage ``effectif`` (approximation de Poisson).
+
     Un comptage N a un écart-type d'environ √N : l'erreur relative vaut 1,96 / √N.
     L'incertitude sur la période de référence est négligée (elle porte sur plus d'années).
     """
@@ -98,6 +115,7 @@ def _intervalle_poisson(indice: pd.Series, effectif: pd.Series) -> tuple[pd.Seri
 
 def affecter_groupes(dep_90: pd.DataFrame) -> pd.DataFrame:
     """Définit le groupe (G80, G90_partiel, G90_total) et la date effective sur 2010-2024.
+
     Les départements relevés après le 31/12/2024 (ex: Morbihan, Eure) sont classés G80.
     """
     df = dep_90.copy()
@@ -233,15 +251,21 @@ def construire_panel(accidents: pd.DataFrame) -> pd.DataFrame:
     return panel
 
 
-# Chargement en cascade
+# --- Chargement en cascade ---------------------------------------------------------------
 
 
 def charger_ou_construire(reconstruire: bool = False) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Renvoie ``(accidents, panel)`` en reconstruisant ce qui manque depuis les sources brutes.
+
     1. ``data/processed/accidents.parquet`` est relu s'il existe ; sinon les BAAC sont
        téléchargées (``collecte.telecharger_baac``) puis nettoyées (``clean_data.build_dataset``).
     2. ``data/processed/panel_dep.parquet`` est relu s'il existe et contient les colonnes
        attendues ; sinon il est reconstruit avec :func:`construire_panel`.
+
+    Parameters
+    ----------
+    reconstruire : bool
+        Ignore les fichiers existants et repart des données brutes.
     """
     chemin_accidents = DOSSIER_PROCESSED / "accidents.parquet"
     chemin_panel = DOSSIER_PROCESSED / "panel_dep.parquet"
@@ -268,11 +292,21 @@ def charger_ou_construire(reconstruire: bool = False) -> tuple[pd.DataFrame, pd.
     return accidents, panel
 
 
-# Description de la base
+# --- Description de la base --------------------------------------------------------------
 
 
 def tableau_controle_annuel(accidents: pd.DataFrame) -> pd.DataFrame:
-    """Accidents, tués et contrôles de la règle du réseau concerné, par année (métropole)."""
+    """Accidents, tués et contrôles de la règle du réseau concerné, par année (métropole).
+
+    Returns
+    -------
+    pd.DataFrame
+        Index ``annee`` ; colonnes ``accidents``, ``tues``, ``part_reseau_concerne``
+        (part des accidents classés sur le réseau 80), ``part_reseau_inconnu`` (règle
+        inapplicable faute d'information) et ``part_vma_80_90`` (parmi les accidents du
+        réseau concerné dont la VMA est connue, part à 80 ou 90 km/h : contrôle de la règle,
+        possible seulement depuis 2019).
+    """
     acc = accidents[accidents["dep"].isin(DEPS_METRO)]
     concerne = masque_perimetre(acc, "reseau_80")
     vma_connue = concerne & acc["vma"].notna()
@@ -312,6 +346,7 @@ def valeurs_manquantes(accidents: pd.DataFrame, variables: list[str] | None = No
 
 def tues_mensuels_par_reseau(accidents: pd.DataFrame) -> pd.DataFrame:
     """Tués par mois sur le réseau concerné (colonne ``True``) et sur les autres réseaux (``False``).
+
     Les accidents dont le réseau est inconnu sont écartés. Entrée de ``graphiques.tracer_mensuel_reseau``.
     """
     acc = accidents[accidents["dep"].isin(DEPS_METRO) & accidents["reseau_80"].notna()]
@@ -325,7 +360,7 @@ def tues_mensuels_par_reseau(accidents: pd.DataFrame) -> pd.DataFrame:
     )
 
 
-# Comparaison des groupes (Q2)
+# --- Comparaison des groupes (Q2) --------------------------------------------------------
 
 
 def _par_dep_annee(panel: pd.DataFrame, variable: str) -> pd.DataFrame:
@@ -343,7 +378,25 @@ def serie_groupes_ic(
     par_habitant: bool = True,
     annees_reference: tuple[int, ...] = ANNEES_REFERENCE,
 ) -> pd.DataFrame:
-    """G4 : indice annuel par groupe (base 100 = moyenne des années de référence) et IC à 95 %."""
+    """G4 : indice annuel par groupe (base 100 = moyenne des années de référence) et IC à 95 %.
+
+    Parameters
+    ----------
+    panel : pd.DataFrame
+        Sortie de :func:`construire_panel`.
+    variable : str
+        Comptage à suivre (``tues_rd``, ``tues_80``, ``accidents_mortels_rd``…).
+    par_habitant : bool
+        Rapporte le comptage du groupe à sa population avant de calculer l'indice.
+    annees_reference : tuple of int
+        Années dont la moyenne vaut 100.
+
+    Returns
+    -------
+    pd.DataFrame
+        Colonnes ``groupe``, ``periode`` (année), ``n`` (comptage), ``valeur``, ``indice``,
+        ``ic_bas``, ``ic_haut``. Entrée de ``graphiques.tracer_series_groupes_ic``.
+    """
     serie = (
         _par_dep_annee(panel, variable)
         .groupby(["groupe", "annee"], as_index=False)
@@ -366,17 +419,26 @@ def etude_evenement(
     annees_relatives: tuple[int, int] = (-5, 4),
 ) -> pd.DataFrame:
     """G5 : évolution des départements relevés selon le nombre d'années depuis leur relèvement.
+
     Chaque département relevé est aligné sur l'année de son propre relèvement (année 0).
     Pour chaque département et chaque année, on calcule un nombre « attendu » :
+
     - si ``relatif_g80`` : sa moyenne des années de référence, multipliée par l'évolution
       des départements G80 entre ces mêmes années calendaires et l'année considérée
       (ce que le département aurait connu s'il avait suivi les G80) ;
     - sinon : sa moyenne des années de référence.
+
     L'indice du groupe vaut ``100 × observé / attendu`` (sommes sur les départements).
     100 signifie « même évolution que les G80 ». Le nombre de départements varie selon
     l'année relative (un département relevé en 2022 n'a que deux années après) :
     les années couvrant moins de ``min_departements`` départements sont retirées, ainsi que
     les années relatives hors de ``annees_relatives`` (bornes incluses).
+
+    Returns
+    -------
+    pd.DataFrame
+        Colonnes ``groupe``, ``annee_relative``, ``n``, ``attendu``, ``nb_departements``,
+        ``indice``, ``ic_bas``, ``ic_haut``. Entrée de ``graphiques.tracer_evenement``.
     """
     dep_an = _par_dep_annee(panel, variable)
     g80 = dep_an[dep_an["groupe"] == "G80"].groupby("annee")["n"].sum()
@@ -412,7 +474,26 @@ def evolution_par_categorie(
     avant: tuple[int, int] = (2015, 2019),
     apres: tuple[int, int] = (2021, 2024),
 ) -> pd.DataFrame:
-    """G6 : tués par an avant / après et évolution (%), par catégorie et par groupe (H4)."""
+    """G6 : tués par an avant / après et évolution (%), par catégorie et par groupe (H4).
+
+    Parameters
+    ----------
+    accidents : pd.DataFrame
+        Sortie de ``clean_data.build_dataset``.
+    groupes : pd.DataFrame
+        Sortie de :func:`affecter_groupes` (colonnes ``code_dep`` et ``groupe``).
+    categorie : str
+        ``"type_collision"`` (construit à partir de ``col`` avec ``CODES_COLLISION``)
+        ou toute colonne existante de ``accidents`` (par exemple ``implique_2rm``).
+    avant, apres : tuple of int
+        Bornes incluses des deux périodes. 2020 est exclue par défaut (Covid).
+
+    Returns
+    -------
+    pd.DataFrame
+        Colonnes ``groupe``, ``<categorie>``, ``tues_par_an_avant``, ``tues_par_an_apres``,
+        ``evolution_%``. Entrée de ``graphiques.tracer_evolution_categories``.
+    """
     acc = accidents[accidents["dep"].isin(DEPS_METRO) & masque_perimetre(accidents, perimetre)].copy()
     if categorie == "type_collision":
         acc["type_collision"] = acc["col"].map(CODES_COLLISION).fillna("inconnu")
@@ -443,6 +524,12 @@ def taux_avant_apres_par_dep(
     apres: tuple[int, int] = (2021, 2024),
 ) -> pd.DataFrame:
     """G7 : tués par million d'habitants et par an, avant et après, pour chaque département.
+
+    Returns
+    -------
+    pd.DataFrame
+        Colonnes ``code_dep``, ``tues_avant``, ``tues_apres`` (totaux), ``taux_avant``,
+        ``taux_apres`` et ``evolution_%``. Entrée de ``graphiques.cartes_avant_apres``.
     """
     acc = accidents[accidents["dep"].isin(DEPS_METRO) & masque_perimetre(accidents, perimetre)]
     tues = acc.groupby(["dep", "annee"])["nb_tues"].sum()
@@ -462,10 +549,12 @@ def taux_avant_apres_par_dep(
     return taux
 
 
-# Différence de différences : tests de robustesse
+# --- Différence de différences : tests de robustesse -------------------------------------
+
 
 def _effet_did(tableau: pd.DataFrame, groupes: list[str]) -> dict:
     """Effet (points de %) = évolution des départements relevés − évolution des G80, mêmes mois.
+
     L'intervalle à 95 % n'intègre que l'aléa de Poisson côté départements relevés
     (le groupe G80, beaucoup plus gros, est traité comme connu).
     """
@@ -489,12 +578,22 @@ def _effet_did(tableau: pd.DataFrame, groupes: list[str]) -> dict:
 
 def tableau_robustesse(panel: pd.DataFrame, variable: str = "tues_rd", fenetre: int = 24) -> pd.DataFrame:
     """Effet estimé du relèvement dans chaque configuration de la section 8.3 du plan.
+
     S'appuie sur ``data_analysis.avant_apres_releve`` : pour chaque département relevé,
     fenêtres symétriques avant / après son relèvement, comparées aux G80 sur les mêmes mois
     (mois de confinement strict exclus).
+
     Configurations : référence ; sans 2020 ; accidents mortels au lieu des tués ;
     départements urbains (``TYPOLOGIES_URBAINES``) exclus ; dates décalées de −6 et +6 mois ;
     réseau 80 complet (RN + RD) au lieu des seules RD.
+
+    Returns
+    -------
+    pd.DataFrame
+        Index à deux niveaux (``configuration``, ``groupe_traite`` ∈ {« total »,
+        « total + partiel »}) ; colonnes ``effet_points_%``, ``ic_bas``, ``ic_haut``,
+        ``evol_traites_%``, ``evol_g80_%``, ``victimes_avant``, ``nb_departements``.
+        Entrée de ``graphiques.tracer_robustesse``.
     """
     from data_analysis import avant_apres_releve
 
@@ -526,18 +625,33 @@ def tableau_robustesse(panel: pd.DataFrame, variable: str = "tues_rd", fenetre: 
     return robustesse
 
 
-# Comparaison avec l'évaluation ONISR (section 5.1)
+# --- Comparaison avec l'évaluation ONISR (section 5.1) -----------------------------------
 
 
 def comparaison_onisr(groupes: pd.DataFrame, par_typologie: bool = False) -> pd.DataFrame:
     """Refait le tableau 2019 / 2022 de l'ONISR avec deux définitions des groupes.
+
     L'indicateur est celui de l'ONISR : tués hors agglomération et hors autoroute en 2019
     et en 2022 (colonnes ``tues_ha_2019_onisr`` et ``tues_ha_2022_onisr``, que nos BAAC
     retrouvent exactement). Deux regroupements sont comparés :
+
     - « ONISR » : relevés avant fin 2022 contre les autres départements ;
     - « Projet » : nos groupes ``G80`` / ``G90_partiel`` / ``G90_total`` (relevés avant fin 2024).
+
     Contrairement à l'ONISR, un département relevé en 2022 compte pour l'année entière
     dans le groupe relevé.
+
+    Parameters
+    ----------
+    groupes : pd.DataFrame
+        Sortie de :func:`affecter_groupes`.
+    par_typologie : bool
+        Détaille chaque groupe par typologie Cerema.
+
+    Returns
+    -------
+    pd.DataFrame
+        Départements, tués 2019 et 2022, évolution en nombre et en %.
     """
     dep = groupes.copy()
     releve_2022 = dep["releve"] & (pd.to_datetime(dep["date_releve"]) <= pd.Timestamp("2022-12-31"))
